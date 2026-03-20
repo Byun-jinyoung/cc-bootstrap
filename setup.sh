@@ -59,25 +59,33 @@ echo ""
 echo "[ Phase 2 ] Install components"
 echo "------------------------------------------------------------"
 
-# [1] Codex global instructions
-echo "  [1/7] Codex instructions..."
-mkdir -p "$HOME/.codex"
-cp "$SCRIPT_DIR/codex/instructions.md" "$HOME/.codex/instructions.md"
-
-# [2] Gemini global instructions
-echo "  [2/7] Gemini instructions..."
-mkdir -p "$HOME/.gemini"
-cp "$SCRIPT_DIR/gemini/GEMINI.md" "$HOME/.gemini/GEMINI.md"
-
-# [3] Claude Code skills
-echo "  [3/7] Skills..."
+# [1] Claude Code commands (slash commands)
+echo "  [1/9] Claude commands..."
 mkdir -p "$CONFIG_DIR/commands"
-cp "$SCRIPT_DIR/claude/commands/"*.md "$CONFIG_DIR/commands/" 2>/dev/null || true
+cp "$SCRIPT_DIR/runtimes/claude/commands/"*.md "$CONFIG_DIR/commands/" 2>/dev/null || true
+
+# [2] Codex global instructions + skills
+echo "  [2/9] Codex instructions + skills..."
+mkdir -p "$HOME/.codex"
+cp "$SCRIPT_DIR/runtimes/codex/instructions.md" "$HOME/.codex/instructions.md"
+if [ -d "$SCRIPT_DIR/skills/paper-analyzer/codex" ]; then
+  mkdir -p "$HOME/.codex/skills/paper-analyzer"
+  cp "$SCRIPT_DIR/skills/paper-analyzer/codex/SKILL.md" "$HOME/.codex/skills/paper-analyzer/SKILL.md"
+fi
+
+# [3] Gemini global instructions + skills
+echo "  [3/9] Gemini instructions + skills..."
+mkdir -p "$HOME/.gemini"
+cp "$SCRIPT_DIR/runtimes/gemini/GEMINI.md" "$HOME/.gemini/GEMINI.md"
+if [ -d "$SCRIPT_DIR/skills/paper-analyzer/gemini" ]; then
+  mkdir -p "$HOME/.gemini/skills/paper-analyzer"
+  cp "$SCRIPT_DIR/skills/paper-analyzer/gemini/SKILL.md" "$HOME/.gemini/skills/paper-analyzer/SKILL.md"
+fi
 
 # [4] Custom statusline
-echo "  [4/7] Custom statusline..."
+echo "  [4/9] Custom statusline..."
 mkdir -p "$CONFIG_DIR/hud"
-cp "$SCRIPT_DIR/hud/my-statusline.mjs" "$CONFIG_DIR/hud/my-statusline.mjs"
+cp "$SCRIPT_DIR/ui/statusline/my-statusline.mjs" "$CONFIG_DIR/hud/my-statusline.mjs"
 chmod +x "$CONFIG_DIR/hud/my-statusline.mjs"
 if [ -f "$CONFIG_DIR/settings.json" ]; then
   python3 -c "
@@ -93,7 +101,7 @@ else
 fi
 
 # [5] codex-gemini-mcp fork
-echo "  [5/7] codex-gemini-mcp (fork)..."
+echo "  [5/9] codex-gemini-mcp (fork)..."
 FORK_INSTALLED=false
 if command -v codex-mcp &>/dev/null; then
   for p in \
@@ -114,7 +122,7 @@ else
 fi
 
 # [6] Gemini swarm extension
-echo "  [6/7] Gemini swarm extension..."
+echo "  [6/9] Gemini swarm extension..."
 if command -v gemini &>/dev/null; then
   if gemini --list-extensions 2>&1 | grep -q "gemini-swarm"; then
     echo "         Already installed"
@@ -126,12 +134,33 @@ else
 fi
 
 # [7] OMC patches
-echo "  [7/7] OMC patches..."
-if [ -f "$SCRIPT_DIR/patches/omc-render-model-first.sh" ]; then
-  bash "$SCRIPT_DIR/patches/omc-render-model-first.sh" 2>&1 | sed 's/^/         /'
+echo "  [7/9] OMC patches..."
+if [ -f "$SCRIPT_DIR/patches/omc/omc-render-model-first.sh" ]; then
+  bash "$SCRIPT_DIR/patches/omc/omc-render-model-first.sh" 2>&1 | sed 's/^/         /'
 else
   echo "         No patches to apply"
 fi
+
+# [8] Obsidian templates
+echo "  [8/9] Obsidian templates..."
+if [ -d "$SCRIPT_DIR/apps/obsidian/templates" ]; then
+  OBSIDIAN_TEMPLATES="${OBSIDIAN_TEMPLATES_DIR:-}"
+  if [ -n "$OBSIDIAN_TEMPLATES" ] && [ -d "$OBSIDIAN_TEMPLATES" ]; then
+    cp "$SCRIPT_DIR/apps/obsidian/templates/"*.md "$OBSIDIAN_TEMPLATES/" 2>/dev/null || true
+    echo "         Copied to $OBSIDIAN_TEMPLATES"
+  else
+    echo "         Skipped (set OBSIDIAN_TEMPLATES_DIR to install)"
+  fi
+fi
+
+# [9] MCP server configs
+echo "  [9/9] MCP server configs..."
+if [ -d "$SCRIPT_DIR/integrations/mcp/servers" ] && ls "$SCRIPT_DIR/integrations/mcp/servers/"*.json &>/dev/null; then
+  echo "         MCP configs available (manual setup required — see README)"
+else
+  echo "         No MCP configs to install"
+fi
+
 echo ""
 
 # ============================================================
@@ -146,6 +175,8 @@ for check in \
   "$HOME/.codex/instructions.md:Codex instructions" \
   "$HOME/.gemini/GEMINI.md:Gemini instructions" \
   "$CONFIG_DIR/commands/gemini-swarm.md:gemini-swarm skill" \
+  "$CONFIG_DIR/commands/analyze-paper.md:analyze-paper skill" \
+  "$CONFIG_DIR/commands/update-feeds.md:update-feeds skill" \
   "$CONFIG_DIR/hud/my-statusline.mjs:Custom statusline"; do
   FILE="${check%%:*}"
   LABEL="${check##*:}"
@@ -157,7 +188,21 @@ for check in \
   fi
 done
 
-# [2] statusLine configured
+# [2] Codex/Gemini shared skills
+for check in \
+  "$HOME/.codex/skills/paper-analyzer/SKILL.md:Codex paper-analyzer" \
+  "$HOME/.gemini/skills/paper-analyzer/SKILL.md:Gemini paper-analyzer"; do
+  FILE="${check%%:*}"
+  LABEL="${check##*:}"
+  if [ -f "$FILE" ]; then
+    echo "  [OK] $LABEL"
+  else
+    echo "  [WARN] $LABEL: not installed"
+    WARNINGS=$((WARNINGS + 1))
+  fi
+done
+
+# [3] statusLine configured
 if [ -f "$CONFIG_DIR/settings.json" ]; then
   if grep -q "my-statusline.mjs" "$CONFIG_DIR/settings.json" 2>/dev/null; then
     echo "  [OK] statusLine -> my-statusline.mjs"
@@ -167,7 +212,7 @@ if [ -f "$CONFIG_DIR/settings.json" ]; then
   fi
 fi
 
-# [3] codex-gemini-mcp fork features
+# [4] codex-gemini-mcp fork features
 if command -v codex-mcp &>/dev/null; then
   FOUND_PATH=""
   for p in \
@@ -205,7 +250,7 @@ else
   WARNINGS=$((WARNINGS + 1))
 fi
 
-# [4] Gemini swarm
+# [5] Gemini swarm
 if command -v gemini &>/dev/null; then
   if gemini --list-extensions 2>&1 | grep -q "gemini-swarm"; then
     echo "  [OK] gemini-swarm extension"
@@ -231,9 +276,11 @@ if [ $WARNINGS -gt 0 ]; then
 fi
 echo ""
 echo "  Installed:"
+echo "    Claude commands:     $CONFIG_DIR/commands/"
 echo "    Codex instructions:  ~/.codex/instructions.md"
+echo "    Codex skills:        ~/.codex/skills/"
 echo "    Gemini instructions: ~/.gemini/GEMINI.md"
-echo "    Skills:              $CONFIG_DIR/commands/"
+echo "    Gemini skills:       ~/.gemini/skills/"
 echo "    Statusline:          $CONFIG_DIR/hud/my-statusline.mjs"
 echo "    codex-gemini-mcp:    $(which codex-mcp 2>/dev/null || echo 'not installed')"
 echo "    gemini-mcp:          $(which gemini-mcp 2>/dev/null || echo 'not installed')"
