@@ -1,0 +1,9 @@
+# cc-bootstrap skill registry
+# 새 skill 추가 시 이 파일에 엔트리 추가 → ./setup.sh sync가 자동 처리
+
+paper-analyzer:
+  path: skills/paper-analyzer
+  runtimes: [codex, gemini]
+  deps:
+    python: [pdfplumber, pdf2image]
+    system: [poppler]

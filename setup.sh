@@ -1,293 +1,189 @@
 #!/bin/bash
-# cc-bootstrap: One-command Claude Code environment setup
-# Usage: git clone https://github.com/Byun-jinyoung/cc-bootstrap.git && cd cc-bootstrap && bash setup.sh
+# cc-bootstrap: AI development environment bootstrap
+# Usage:
+#   git clone https://github.com/Byun-jinyoung/cc-bootstrap.git ~/.cc-bootstrap
+#   cd ~/.cc-bootstrap && ./setup.sh sync
+#
+# Subcommands:
+#   sync      — Create/update symlinks from runtime dirs to this repo
+#   doctor    — Check dependencies (system packages, Python libs, CLIs)
+#   validate  — Validate skill frontmatter
+#   update    — git pull → validate → sync → doctor
+#   install   — Legacy copy-based install (environments where symlinks don't work)
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-ERRORS=0
+CODEX_DIR="$HOME/.codex"
+GEMINI_DIR="$HOME/.gemini"
 WARNINGS=0
+ERRORS=0
+SUBCMD="${1:-sync}"
 
-echo "=== cc-bootstrap: Claude Code Environment Setup ==="
-echo ""
-
-# ============================================================
-# Phase 1: Dependency Check
-# ============================================================
-echo "[ Phase 1 ] Dependency check"
-echo "------------------------------------------------------------"
-
-# Required
-for cmd in git node npm python3; do
-  if command -v $cmd &>/dev/null; then
-    echo "  [OK] $cmd: $(command -v $cmd)"
-  else
-    echo "  [FAIL] $cmd: not found"
-    ERRORS=$((ERRORS + 1))
+make_link() {
+  local src="$1" dst="$2"
+  if [ -L "$dst" ]; then rm "$dst"
+  elif [ -e "$dst" ]; then mv "$dst" "${dst}.bak.$(date +%s)"; echo "    [BACKUP] $dst"
   fi
-done
+  mkdir -p "$(dirname "$dst")"
+  ln -s "$src" "$dst"
+  echo "    [LINK] $(basename "$dst") → $src"
+}
 
-# Node version
-NODE_VER=$(node -v 2>/dev/null | sed 's/v//' | cut -d. -f1)
-if [ -n "$NODE_VER" ] && [ "$NODE_VER" -ge 20 ]; then
-  echo "  [OK] node version: $(node -v)"
-else
-  echo "  [FAIL] node >= 20 required (found: $(node -v 2>/dev/null || echo 'none'))"
-  ERRORS=$((ERRORS + 1))
-fi
-
-# Optional
-for cmd in codex gemini claude; do
-  if command -v $cmd &>/dev/null; then
-    echo "  [OK] $cmd: $(command -v $cmd)"
-  else
-    echo "  [WARN] $cmd: not found (optional)"
-    WARNINGS=$((WARNINGS + 1))
-  fi
-done
-
-if [ $ERRORS -gt 0 ]; then
+cmd_sync() {
+  echo "=== cc-bootstrap sync ==="
   echo ""
-  echo "FATAL: $ERRORS required dependency missing. Fix and re-run."
-  exit 1
-fi
-echo ""
-
-# ============================================================
-# Phase 2: Install Components
-# ============================================================
-echo "[ Phase 2 ] Install components"
-echo "------------------------------------------------------------"
-
-# [1] Claude Code commands (slash commands)
-echo "  [1/9] Claude commands..."
-mkdir -p "$CONFIG_DIR/commands"
-cp "$SCRIPT_DIR/runtimes/claude/commands/"*.md "$CONFIG_DIR/commands/" 2>/dev/null || true
-
-# [2] Codex global instructions + skills
-echo "  [2/9] Codex instructions + skills..."
-mkdir -p "$HOME/.codex"
-cp "$SCRIPT_DIR/runtimes/codex/instructions.md" "$HOME/.codex/instructions.md"
-if [ -d "$SCRIPT_DIR/skills/paper-analyzer/codex" ]; then
-  mkdir -p "$HOME/.codex/skills/paper-analyzer"
-  cp "$SCRIPT_DIR/skills/paper-analyzer/codex/SKILL.md" "$HOME/.codex/skills/paper-analyzer/SKILL.md"
-fi
-
-# [3] Gemini global instructions + skills
-echo "  [3/9] Gemini instructions + skills..."
-mkdir -p "$HOME/.gemini"
-cp "$SCRIPT_DIR/runtimes/gemini/GEMINI.md" "$HOME/.gemini/GEMINI.md"
-if [ -d "$SCRIPT_DIR/skills/paper-analyzer/gemini" ]; then
-  mkdir -p "$HOME/.gemini/skills/paper-analyzer"
-  cp "$SCRIPT_DIR/skills/paper-analyzer/gemini/SKILL.md" "$HOME/.gemini/skills/paper-analyzer/SKILL.md"
-fi
-
-# [4] Custom statusline
-echo "  [4/9] Custom statusline..."
-mkdir -p "$CONFIG_DIR/hud"
-cp "$SCRIPT_DIR/ui/statusline/my-statusline.mjs" "$CONFIG_DIR/hud/my-statusline.mjs"
-chmod +x "$CONFIG_DIR/hud/my-statusline.mjs"
-if [ -f "$CONFIG_DIR/settings.json" ]; then
-  python3 -c "
-import json
-with open('$CONFIG_DIR/settings.json') as f:
-    d = json.load(f)
-d['statusLine'] = {'type': 'command', 'command': 'node \$HOME/.claude/hud/my-statusline.mjs'}
-with open('$CONFIG_DIR/settings.json', 'w') as f:
-    json.dump(d, f, indent=2)
-"
-else
-  echo '{"statusLine":{"type":"command","command":"node $HOME/.claude/hud/my-statusline.mjs"}}' > "$CONFIG_DIR/settings.json"
-fi
-
-# [5] codex-gemini-mcp fork
-echo "  [5/9] codex-gemini-mcp (fork)..."
-FORK_INSTALLED=false
-if command -v codex-mcp &>/dev/null; then
-  for p in \
-    "$(npm prefix -g 2>/dev/null)/lib/node_modules/@donghae0414/codex-gemini-mcp/dist" \
-    "/usr/local/lib/node_modules/@donghae0414/codex-gemini-mcp/dist" \
-    "/usr/lib/node_modules/@donghae0414/codex-gemini-mcp/dist"; do
-    if grep -q "session_id" "$p/tools/schema.js" 2>/dev/null; then
-      FORK_INSTALLED=true
-      break
-    fi
+  # Dependencies
+  for cmd in git node npm python3; do
+    command -v $cmd &>/dev/null || { echo "[FAIL] $cmd not found"; ERRORS=$((ERRORS+1)); }
   done
-fi
-if [ "$FORK_INSTALLED" = true ]; then
-  echo "         Fork already installed"
-else
-  echo "         Installing fork..."
-  curl -sL https://raw.githubusercontent.com/Byun-jinyoung/codex-gemini-mcp/main/install.sh | bash
-fi
+  [ $ERRORS -gt 0 ] && echo "FATAL: missing deps" && exit 1
 
-# [6] Gemini swarm extension
-echo "  [6/9] Gemini swarm extension..."
-if command -v gemini &>/dev/null; then
-  if gemini --list-extensions 2>&1 | grep -q "gemini-swarm"; then
-    echo "         Already installed"
-  else
-    gemini extensions install https://github.com/tmdgusya/gemini-swarm --consent 2>&1 | tail -1
-  fi
-else
-  echo "         Skipped (Gemini CLI not found)"
-fi
-
-# [7] OMC patches
-echo "  [7/9] OMC patches..."
-if [ -f "$SCRIPT_DIR/patches/omc/omc-render-model-first.sh" ]; then
-  bash "$SCRIPT_DIR/patches/omc/omc-render-model-first.sh" 2>&1 | sed 's/^/         /'
-else
-  echo "         No patches to apply"
-fi
-
-# [8] Obsidian templates
-echo "  [8/9] Obsidian templates..."
-if [ -d "$SCRIPT_DIR/apps/obsidian/templates" ]; then
-  OBSIDIAN_TEMPLATES="${OBSIDIAN_TEMPLATES_DIR:-}"
-  if [ -n "$OBSIDIAN_TEMPLATES" ] && [ -d "$OBSIDIAN_TEMPLATES" ]; then
-    cp "$SCRIPT_DIR/apps/obsidian/templates/"*.md "$OBSIDIAN_TEMPLATES/" 2>/dev/null || true
-    echo "         Copied to $OBSIDIAN_TEMPLATES"
-  else
-    echo "         Skipped (set OBSIDIAN_TEMPLATES_DIR to install)"
-  fi
-fi
-
-# [9] MCP server configs
-echo "  [9/9] MCP server configs..."
-if [ -d "$SCRIPT_DIR/integrations/mcp/servers" ] && ls "$SCRIPT_DIR/integrations/mcp/servers/"*.json &>/dev/null; then
-  echo "         MCP configs available (manual setup required — see README)"
-else
-  echo "         No MCP configs to install"
-fi
-
-echo ""
-
-# ============================================================
-# Phase 3: Integrity Verification
-# ============================================================
-echo "[ Phase 3 ] Integrity verification"
-echo "------------------------------------------------------------"
-VERIFY_ERRORS=0
-
-# [1] Config files exist
-for check in \
-  "$HOME/.codex/instructions.md:Codex instructions" \
-  "$HOME/.gemini/GEMINI.md:Gemini instructions" \
-  "$CONFIG_DIR/commands/gemini-swarm.md:gemini-swarm skill" \
-  "$CONFIG_DIR/commands/analyze-paper.md:analyze-paper skill" \
-  "$CONFIG_DIR/commands/update-feeds.md:update-feeds skill" \
-  "$CONFIG_DIR/hud/my-statusline.mjs:Custom statusline"; do
-  FILE="${check%%:*}"
-  LABEL="${check##*:}"
-  if [ -f "$FILE" ]; then
-    echo "  [OK] $LABEL"
-  else
-    echo "  [FAIL] $LABEL: $FILE not found"
-    VERIFY_ERRORS=$((VERIFY_ERRORS + 1))
-  fi
-done
-
-# [2] Codex/Gemini shared skills
-for check in \
-  "$HOME/.codex/skills/paper-analyzer/SKILL.md:Codex paper-analyzer" \
-  "$HOME/.gemini/skills/paper-analyzer/SKILL.md:Gemini paper-analyzer"; do
-  FILE="${check%%:*}"
-  LABEL="${check##*:}"
-  if [ -f "$FILE" ]; then
-    echo "  [OK] $LABEL"
-  else
-    echo "  [WARN] $LABEL: not installed"
-    WARNINGS=$((WARNINGS + 1))
-  fi
-done
-
-# [3] statusLine configured
-if [ -f "$CONFIG_DIR/settings.json" ]; then
-  if grep -q "my-statusline.mjs" "$CONFIG_DIR/settings.json" 2>/dev/null; then
-    echo "  [OK] statusLine -> my-statusline.mjs"
-  else
-    echo "  [FAIL] statusLine not pointing to my-statusline.mjs"
-    VERIFY_ERRORS=$((VERIFY_ERRORS + 1))
-  fi
-fi
-
-# [4] codex-gemini-mcp fork features
-if command -v codex-mcp &>/dev/null; then
-  FOUND_PATH=""
-  for p in \
-    "$(npm prefix -g 2>/dev/null)/lib/node_modules/@donghae0414/codex-gemini-mcp/dist" \
-    "/usr/local/lib/node_modules/@donghae0414/codex-gemini-mcp/dist" \
-    "/usr/lib/node_modules/@donghae0414/codex-gemini-mcp/dist"; do
-    if [ -d "$p" ] 2>/dev/null; then
-      FOUND_PATH="$p"
-      break
-    fi
+  # Claude commands
+  echo "[1] Claude commands"
+  mkdir -p "$CONFIG_DIR/commands"
+  for f in "$SCRIPT_DIR/runtimes/claude/commands/"*.md; do
+    [ -f "$f" ] && make_link "$f" "$CONFIG_DIR/commands/$(basename "$f")"
   done
 
-  if [ -n "$FOUND_PATH" ]; then
-    for check in \
-      "$FOUND_PATH/tools/schema.js:session_id:session_id param" \
-      "$FOUND_PATH/providers/gemini.js:\"-y\":gemini -y flag" \
-      "$FOUND_PATH/providers/codex.js:\"resume\":codex resume"; do
-      FILE="${check%%:*}"
-      REST="${check#*:}"
-      PATTERN="${REST%%:*}"
-      LABEL="${REST##*:}"
-      if grep -q "$PATTERN" "$FILE" 2>/dev/null; then
-        echo "  [OK] $LABEL"
-      else
-        echo "  [FAIL] $LABEL"
-        VERIFY_ERRORS=$((VERIFY_ERRORS + 1))
-      fi
+  # Claude hooks
+  if ls "$SCRIPT_DIR/runtimes/claude/hooks/"* &>/dev/null 2>&1; then
+    echo "[2] Claude hooks"
+    mkdir -p "$CONFIG_DIR/hooks"
+    for f in "$SCRIPT_DIR/runtimes/claude/hooks/"*; do
+      [ -f "$f" ] && make_link "$f" "$CONFIG_DIR/hooks/$(basename "$f")"
     done
-  else
-    echo "  [WARN] codex-gemini-mcp dist not found for verification"
-    WARNINGS=$((WARNINGS + 1))
   fi
-else
-  echo "  [WARN] codex-mcp not on PATH"
-  WARNINGS=$((WARNINGS + 1))
-fi
 
-# [5] Gemini swarm
-if command -v gemini &>/dev/null; then
-  if gemini --list-extensions 2>&1 | grep -q "gemini-swarm"; then
-    echo "  [OK] gemini-swarm extension"
-  else
-    echo "  [WARN] gemini-swarm not installed"
-    WARNINGS=$((WARNINGS + 1))
+  # Codex
+  echo "[3] Codex"
+  mkdir -p "$CODEX_DIR"
+  [ -f "$SCRIPT_DIR/runtimes/codex/instructions.md" ] && \
+    make_link "$SCRIPT_DIR/runtimes/codex/instructions.md" "$CODEX_DIR/instructions.md"
+
+  # Gemini
+  echo "[4] Gemini"
+  mkdir -p "$GEMINI_DIR"
+  [ -f "$SCRIPT_DIR/runtimes/gemini/GEMINI.md" ] && \
+    make_link "$SCRIPT_DIR/runtimes/gemini/GEMINI.md" "$GEMINI_DIR/GEMINI.md"
+
+  # Shared skills (from registry.yaml)
+  echo "[5] Shared skills"
+  if [ -f "$SCRIPT_DIR/skills/registry.yaml" ] && command -v python3 &>/dev/null; then
+    python3 << PYEOF
+import sys, os
+try:
+    import yaml
+except ImportError:
+    print("    [WARN] PyYAML missing. pip install pyyaml")
+    sys.exit(0)
+with open("$SCRIPT_DIR/skills/registry.yaml") as f:
+    reg = yaml.safe_load(f)
+dirs = {"claude": "$CONFIG_DIR/skills", "codex": "$CODEX_DIR/skills", "gemini": "$GEMINI_DIR/skills"}
+for name, info in reg.items():
+    for rt in info.get("runtimes", []):
+        if rt not in dirs: continue
+        src = os.path.join("$SCRIPT_DIR", info["path"], rt)
+        if not os.path.exists(src): src = os.path.join("$SCRIPT_DIR", info["path"])
+        dst = os.path.join(dirs[rt], name)
+        os.makedirs(dirs[rt], exist_ok=True)
+        if os.path.islink(dst): os.remove(dst)
+        elif os.path.exists(dst): os.rename(dst, dst+".bak")
+        os.symlink(src, dst)
+        print(f"    [LINK] {rt}/{name} → {src}")
+PYEOF
   fi
-fi
 
-echo ""
+  # Statusline
+  echo "[6] Statusline"
+  if [ -f "$SCRIPT_DIR/ui/statusline/my-statusline.mjs" ]; then
+    mkdir -p "$CONFIG_DIR/hud"
+    make_link "$SCRIPT_DIR/ui/statusline/my-statusline.mjs" "$CONFIG_DIR/hud/my-statusline.mjs"
+  fi
 
-# ============================================================
-# Summary
-# ============================================================
-echo "============================================================"
-if [ $VERIFY_ERRORS -eq 0 ]; then
-  echo "  cc-bootstrap COMPLETE — all checks passed"
-else
-  echo "  cc-bootstrap COMPLETE — $VERIFY_ERRORS error(s)"
-fi
-if [ $WARNINGS -gt 0 ]; then
-  echo "  $WARNINGS warning(s) (optional components)"
-fi
-echo ""
-echo "  Installed:"
-echo "    Claude commands:     $CONFIG_DIR/commands/"
-echo "    Codex instructions:  ~/.codex/instructions.md"
-echo "    Codex skills:        ~/.codex/skills/"
-echo "    Gemini instructions: ~/.gemini/GEMINI.md"
-echo "    Gemini skills:       ~/.gemini/skills/"
-echo "    Statusline:          $CONFIG_DIR/hud/my-statusline.mjs"
-echo "    codex-gemini-mcp:    $(which codex-mcp 2>/dev/null || echo 'not installed')"
-echo "    gemini-mcp:          $(which gemini-mcp 2>/dev/null || echo 'not installed')"
-echo ""
-echo "  Restart Claude Code to apply all changes."
-echo "============================================================"
+  # External tools
+  echo "[7] External tools"
+  # codex-gemini-mcp
+  if command -v codex-mcp &>/dev/null; then
+    echo "    [OK] codex-mcp installed"
+  else
+    echo "    Installing codex-gemini-mcp fork..."
+    curl -sL https://raw.githubusercontent.com/Byun-jinyoung/codex-gemini-mcp/main/install.sh | bash
+  fi
+  # gemini-swarm
+  if command -v gemini &>/dev/null; then
+    if gemini --list-extensions 2>&1 | grep -q "gemini-swarm"; then
+      echo "    [OK] gemini-swarm installed"
+    else
+      gemini extensions install https://github.com/tmdgusya/gemini-swarm --consent 2>&1 | tail -1
+    fi
+  fi
+  # OMC patches
+  [ -f "$SCRIPT_DIR/patches/omc/omc-render-model-first.sh" ] && \
+    bash "$SCRIPT_DIR/patches/omc/omc-render-model-first.sh" 2>&1 | sed 's/^/    /'
 
-if [ $VERIFY_ERRORS -gt 0 ]; then
-  exit 1
-fi
+  echo ""
+  echo "=== sync complete. Restart Claude Code to apply. ==="
+}
+
+cmd_doctor() {
+  echo "=== cc-bootstrap doctor ==="
+  for cmd in git node npm python3 uv claude codex gemini; do
+    if command -v $cmd &>/dev/null; then echo "  [OK] $cmd"
+    else echo "  [MISS] $cmd"; WARNINGS=$((WARNINGS+1)); fi
+  done
+  echo ""
+  echo "[ Symlinks ]"
+  for f in "$CONFIG_DIR/commands/analyze-paper.md" "$CONFIG_DIR/commands/update-feeds.md" \
+    "$CODEX_DIR/instructions.md" "$GEMINI_DIR/GEMINI.md"; do
+    if [ -L "$f" ] || [ -f "$f" ]; then echo "  [OK] $(basename "$f")"
+    else echo "  [MISS] $f"; WARNINGS=$((WARNINGS+1)); fi
+  done
+  [ $WARNINGS -gt 0 ] && echo "  $WARNINGS item(s) missing." || echo "  All checks passed."
+}
+
+cmd_validate() {
+  echo "=== cc-bootstrap validate ==="
+  for skill_dir in "$SCRIPT_DIR/skills/"*/; do
+    [ -d "$skill_dir" ] || continue
+    name="$(basename "$skill_dir")"
+    found=false
+    for sub in "$skill_dir"*/SKILL.md; do [ -f "$sub" ] && found=true && break; done
+    $found && echo "  [OK] $name" || echo "  [FAIL] $name: no SKILL.md"
+  done
+  for f in "$SCRIPT_DIR/runtimes/claude/commands/"*.md; do
+    [ -f "$f" ] || continue
+    head -5 "$f" | grep -q "description:" && echo "  [OK] $(basename "$f")" || echo "  [WARN] $(basename "$f"): no description"
+  done
+}
+
+cmd_update() {
+  echo "=== cc-bootstrap update ==="
+  echo "[1/4] git pull"
+  git -C "$SCRIPT_DIR" pull --ff-only 2>&1 | sed 's/^/  /'
+  echo "[2/4] validate" && cmd_validate
+  echo "[3/4] sync" && cmd_sync
+  echo "[4/4] doctor" && cmd_doctor
+}
+
+cmd_install() {
+  echo "=== cc-bootstrap install (legacy copy mode) ==="
+  mkdir -p "$CONFIG_DIR/commands" "$CONFIG_DIR/hud" "$CODEX_DIR" "$GEMINI_DIR"
+  cp "$SCRIPT_DIR/runtimes/claude/commands/"*.md "$CONFIG_DIR/commands/" 2>/dev/null || true
+  cp "$SCRIPT_DIR/runtimes/codex/instructions.md" "$CODEX_DIR/" 2>/dev/null || true
+  cp "$SCRIPT_DIR/runtimes/gemini/GEMINI.md" "$GEMINI_DIR/" 2>/dev/null || true
+  cp "$SCRIPT_DIR/ui/statusline/my-statusline.mjs" "$CONFIG_DIR/hud/" 2>/dev/null || true
+  for rt in codex gemini; do
+    for sd in "$SCRIPT_DIR/skills/"*/; do
+      [ -d "$sd/$rt" ] && mkdir -p "$HOME/.$rt/skills/$(basename "$sd")" && \
+        cp "$sd/$rt/"* "$HOME/.$rt/skills/$(basename "$sd")/" 2>/dev/null
+    done
+  done
+  echo "  Legacy install complete."
+}
+
+case "$SUBCMD" in
+  sync) cmd_sync ;; doctor) cmd_doctor ;; validate) cmd_validate ;;
+  update) cmd_update ;; install) cmd_install ;;
+  *) echo "Usage: ./setup.sh {sync|doctor|validate|update|install}"; exit 1 ;;
+esac
