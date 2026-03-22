@@ -135,7 +135,22 @@ async function runOmcHud() {
     return;
   } catch { /* continue */ }
 
-  console.log("[statusline] OMC HUD not found. Run: /oh-my-claudecode:omc-setup");
+  // Fallback: try cc-alchemy-statusline
+  try {
+    const { execSync } = await import("node:child_process");
+    const output = execSync("cc-alchemy-statusline", { encoding: "utf-8", timeout: 5000 });
+    process.stdout.write(output);
+    return;
+  } catch { /* continue */ }
+
+  // Final fallback: minimal statusline
+  const { execSync: exec } = await import("node:child_process");
+  try {
+    const branch = exec("git rev-parse --abbrev-ref HEAD 2>/dev/null", { encoding: "utf-8" }).trim();
+    console.log(`⎇ ${branch}`);
+  } catch {
+    console.log("cc-bootstrap statusline");
+  }
 }
 
 // Main
