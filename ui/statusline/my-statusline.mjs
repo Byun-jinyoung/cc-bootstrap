@@ -138,19 +138,25 @@ async function runOmcHud() {
   // Fallback: try cc-alchemy-statusline
   try {
     const { execSync } = await import("node:child_process");
-    const output = execSync("cc-alchemy-statusline", { encoding: "utf-8", timeout: 5000 });
-    process.stdout.write(output);
-    return;
+    const output = execSync("cc-alchemy-statusline", { encoding: "utf-8", timeout: 5000 }).trim();
+    if (output && output !== "No data") {
+      console.log(output);
+      return;
+    }
   } catch { /* continue */ }
 
   // Final fallback: minimal statusline
   const { execSync: exec } = await import("node:child_process");
+  const parts = [];
   try {
     const branch = exec("git rev-parse --abbrev-ref HEAD 2>/dev/null", { encoding: "utf-8" }).trim();
-    console.log(`⎇ ${branch}`);
-  } catch {
-    console.log("cc-bootstrap statusline");
-  }
+    if (branch) parts.push(`⎇ ${branch}`);
+  } catch { /* no git */ }
+  try {
+    const model = process.env.CLAUDE_MODEL || "opus";
+    parts.push(`◆ ${model}`);
+  } catch { /* skip */ }
+  console.log(parts.length > 0 ? parts.join("  ") : "cc-bootstrap");
 }
 
 // Main
