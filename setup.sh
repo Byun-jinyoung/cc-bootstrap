@@ -122,16 +122,98 @@ PYEOF
   [ -f "$SCRIPT_DIR/patches/omc/omc-render-model-first.sh" ] && \
     bash "$SCRIPT_DIR/patches/omc/omc-render-model-first.sh" 2>&1 | sed 's/^/    /'
 
+  # [8] Claude Code plugins
+  echo "[8] Plugins"
+  if command -v claude &>/dev/null; then
+    # Octo (Claude Octopus)
+    if claude plugin list 2>/dev/null | grep -q "octo@nyldn"; then
+      echo "    [OK] octo already installed"
+    else
+      echo "    Installing octo..."
+      claude plugin marketplace add https://github.com/nyldn/claude-octopus.git 2>&1 | tail -1
+      claude plugin install octo@nyldn-plugins 2>&1 | tail -1
+    fi
+    # Claude-mem
+    if claude plugin list 2>/dev/null | grep -q "claude-mem@thedotmack"; then
+      echo "    [OK] claude-mem already installed"
+    else
+      echo "    Installing claude-mem..."
+      claude plugin marketplace add thedotmack/claude-mem 2>&1 | tail -1
+      claude plugin install claude-mem@thedotmack 2>&1 | tail -1
+    fi
+    # Ouroboros
+    if claude plugin list 2>/dev/null | grep -q "ouroboros@ouroboros"; then
+      echo "    [OK] ouroboros already installed"
+    else
+      echo "    Installing ouroboros..."
+      claude plugin marketplace add Q00/ouroboros 2>&1 | tail -1
+      claude plugin install ouroboros@ouroboros 2>&1 | tail -1
+    fi
+    # Document skills
+    if claude plugin list 2>/dev/null | grep -q "document-skills@anthropic"; then
+      echo "    [OK] document-skills already installed"
+    else
+      echo "    Installing document-skills..."
+      claude plugin install document-skills@anthropic-agent-skills 2>&1 | tail -1
+    fi
+  else
+    echo "    [SKIP] Claude Code not found"
+  fi
+
+  # [9] MCP servers
+  echo "[9] MCP servers"
+  if command -v claude &>/dev/null; then
+    # Serena
+    if claude mcp list 2>/dev/null | grep -q "serena.*Connected"; then
+      echo "    [OK] serena already connected"
+    else
+      echo "    Adding serena..."
+      claude mcp add serena -- uvx --from "git+https://github.com/oraios/serena" serena start-mcp-server 2>&1 | tail -1
+    fi
+    # alphaXiv
+    if claude mcp list 2>/dev/null | grep -q "alphaxiv.*Connected"; then
+      echo "    [OK] alphaxiv already connected"
+    else
+      echo "    Adding alphaxiv..."
+      claude mcp add --transport http alphaxiv https://api.alphaxiv.org/mcp/v1 2>&1 | tail -1
+    fi
+  fi
+
+  # [10] Frameworks (GSD + RTK)
+  echo "[10] Frameworks"
+  # GSD
+  if ls "$CONFIG_DIR/commands/gsd"* &>/dev/null 2>&1; then
+    echo "    [OK] GSD already installed"
+  else
+    echo "    Installing GSD..."
+    npx get-shit-done-cc@latest 2>&1 | tail -3
+  fi
+  # RTK
+  if command -v rtk &>/dev/null; then
+    echo "    [OK] RTK $(rtk --version 2>/dev/null)"
+  else
+    echo "    Installing RTK..."
+    if command -v brew &>/dev/null; then
+      brew install rtk 2>&1 | tail -1
+      rtk init -g 2>&1 | tail -1
+    else
+      echo "    [WARN] brew not found. Install RTK manually: https://github.com/rtk-ai/rtk"
+    fi
+  fi
+
   echo ""
   echo "=== sync complete. Restart Claude Code to apply. ==="
 }
 
 cmd_doctor() {
   echo "=== cc-bootstrap doctor ==="
-  for cmd in git node npm python3 uv claude codex gemini; do
+
+  echo "[ CLI tools ]"
+  for cmd in git node npm python3 uv claude codex gemini rtk playwright; do
     if command -v $cmd &>/dev/null; then echo "  [OK] $cmd"
     else echo "  [MISS] $cmd"; WARNINGS=$((WARNINGS+1)); fi
   done
+
   echo ""
   echo "[ Symlinks ]"
   for f in "$CONFIG_DIR/commands/analyze-paper.md" "$CONFIG_DIR/commands/update-feeds.md" \
@@ -139,6 +221,33 @@ cmd_doctor() {
     if [ -L "$f" ] || [ -f "$f" ]; then echo "  [OK] $(basename "$f")"
     else echo "  [MISS] $f"; WARNINGS=$((WARNINGS+1)); fi
   done
+
+  echo ""
+  echo "[ Plugins ]"
+  if command -v claude &>/dev/null; then
+    for p in "octo@nyldn" "claude-mem@thedotmack" "ouroboros@ouroboros" "document-skills@anthropic"; do
+      if claude plugin list 2>/dev/null | grep -q "$p"; then echo "  [OK] $p"
+      else echo "  [MISS] $p"; WARNINGS=$((WARNINGS+1)); fi
+    done
+  fi
+
+  echo ""
+  echo "[ MCP servers ]"
+  if command -v claude &>/dev/null; then
+    for m in codex-mcp gemini-mcp serena alphaxiv slack-server; do
+      if claude mcp list 2>/dev/null | grep -q "$m.*Connected"; then echo "  [OK] $m"
+      else echo "  [MISS] $m"; WARNINGS=$((WARNINGS+1)); fi
+    done
+  fi
+
+  echo ""
+  echo "[ Frameworks ]"
+  if ls "$CONFIG_DIR/commands/gsd"* &>/dev/null 2>&1; then echo "  [OK] GSD"
+  else echo "  [MISS] GSD"; WARNINGS=$((WARNINGS+1)); fi
+  if command -v rtk &>/dev/null; then echo "  [OK] RTK"
+  else echo "  [MISS] RTK"; WARNINGS=$((WARNINGS+1)); fi
+
+  echo ""
   [ $WARNINGS -gt 0 ] && echo "  $WARNINGS item(s) missing." || echo "  All checks passed."
 }
 
