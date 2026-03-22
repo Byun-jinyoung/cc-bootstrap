@@ -188,16 +188,19 @@ PYEOF
     echo "    Installing GSD..."
     npx get-shit-done-cc@latest 2>&1 | tail -3
   fi
-  # RTK
+  # RTK (cross-platform: macOS + Linux)
   if command -v rtk &>/dev/null; then
     echo "    [OK] RTK $(rtk --version 2>/dev/null)"
   else
     echo "    Installing RTK..."
-    if command -v brew &>/dev/null; then
-      brew install rtk 2>&1 | tail -1
+    curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/master/install.sh | sh 2>&1 | tail -3
+    # Ensure ~/.local/bin is in PATH for current session
+    export PATH="$HOME/.local/bin:$PATH"
+    if command -v rtk &>/dev/null; then
       rtk init -g 2>&1 | tail -1
+      echo "    [OK] RTK installed: $(rtk --version 2>/dev/null)"
     else
-      echo "    [WARN] brew not found. Install RTK manually: https://github.com/rtk-ai/rtk"
+      echo "    [WARN] RTK install failed. See https://github.com/rtk-ai/rtk"
     fi
   fi
 
