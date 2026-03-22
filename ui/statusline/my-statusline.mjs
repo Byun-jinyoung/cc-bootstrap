@@ -135,13 +135,21 @@ async function runOmcHud() {
     return;
   } catch { /* continue */ }
 
-  // Fallback: try cc-alchemy-statusline
+  // Fallback: pipe stdin through to cc-alchemy-statusline
   try {
+    const { readFileSync } = await import("node:fs");
     const { execSync } = await import("node:child_process");
-    const output = execSync("cc-alchemy-statusline", { encoding: "utf-8", timeout: 5000 }).trim();
-    if (output && output !== "No data") {
-      console.log(output);
-      return;
+    const stdin = readFileSync(0, "utf-8");
+    if (stdin.trim()) {
+      const output = execSync("cc-alchemy-statusline", {
+        input: stdin,
+        encoding: "utf-8",
+        timeout: 5000,
+      }).trim();
+      if (output && output !== "No data") {
+        console.log(output);
+        return;
+      }
     }
   } catch { /* continue */ }
 
