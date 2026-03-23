@@ -229,7 +229,7 @@ PYEOF
     install_plugin "octo" "octo@nyldn" "https://github.com/nyldn/claude-octopus.git" "octo@nyldn-plugins"
     install_plugin "claude-mem" "claude-mem@thedotmack" "thedotmack/claude-mem" "claude-mem@thedotmack"
     install_plugin "ouroboros" "ouroboros@ouroboros" "Q00/ouroboros" "ouroboros@ouroboros"
-    install_plugin "document-skills" "document-skills@anthropic" "" "document-skills@anthropic-agent-skills"
+    install_plugin "document-skills" "document-skills@anthropic" "anthropics/skills" "document-skills@anthropic-agent-skills"
   else
     log_and_print "    [SKIP] Claude Code not found"
   fi
@@ -262,10 +262,15 @@ PYEOF
   if ls "$CONFIG_DIR/commands/gsd"* &>/dev/null 2>&1; then
     log_and_print "    [OK] GSD already installed"
   else
-    log_and_print "    Installing GSD (npm install -g)..."
-    run_with_timeout "GSD install" "npm install -g get-shit-done-cc@latest < /dev/null" | tail -3 || {
-      log_and_print "    [WARN] npm install -g failed, trying npx..."
-      run_with_timeout "GSD install (npx)" "npx --yes get-shit-done-cc@latest < /dev/null" | tail -3 || true
+    log_and_print "    Installing GSD (npx get-shit-done-cc)..."
+    # GSD installs by running bin/install.js which copies .md files to ~/.claude/commands/
+    # npx is the official method; --yes prevents interactive prompt; stdin from /dev/null prevents hang
+    run_with_timeout "GSD install" "npx --yes get-shit-done-cc@latest < /dev/null" | tail -3 || {
+      # Fallback: download tarball and run install.js directly
+      log_and_print "    [WARN] npx failed, trying manual install..."
+      run_with_timeout "GSD manual install" \
+        "cd /tmp && npm pack get-shit-done-cc@latest < /dev/null && tar xzf get-shit-done-cc-*.tgz && node package/bin/install.js && rm -rf package get-shit-done-cc-*.tgz" \
+        | tail -3 || true
     }
   fi
   # RTK (cross-platform: macOS + Linux)
