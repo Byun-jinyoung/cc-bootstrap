@@ -246,13 +246,39 @@ PYEOF
     }
     [ -n "$mcp_list" ] && log_and_print "    MCP list retrieved."
 
+    # codex-mcp
+    if echo "$mcp_list" | grep -q "codex-mcp"; then
+      log_and_print "    [OK] codex-mcp already added"
+    else
+      if command -v codex-mcp &>/dev/null; then
+        log_and_print "    Adding codex-mcp..."
+        run_with_timeout "codex-mcp add" \
+          "claude mcp add codex-mcp -- codex-mcp < /dev/null" \
+          | tail -1 || true
+      else
+        log_and_print "    [SKIP] codex-mcp binary not found"
+      fi
+    fi
+    # gemini-mcp
+    if echo "$mcp_list" | grep -q "gemini-mcp"; then
+      log_and_print "    [OK] gemini-mcp already added"
+    else
+      if command -v gemini-mcp &>/dev/null; then
+        log_and_print "    Adding gemini-mcp..."
+        run_with_timeout "gemini-mcp add" \
+          "claude mcp add gemini-mcp -- gemini-mcp < /dev/null" \
+          | tail -1 || true
+      else
+        log_and_print "    [SKIP] gemini-mcp binary not found"
+      fi
+    fi
     # Serena
     if echo "$mcp_list" | grep -q "serena"; then
       log_and_print "    [OK] serena already added"
     else
       log_and_print "    Adding serena..."
       run_with_timeout "serena mcp add" \
-        "claude mcp add serena -- uvx --from 'git+https://github.com/oraios/serena' serena start-mcp-server" \
+        "claude mcp add serena -- uvx --from 'git+https://github.com/oraios/serena' serena start-mcp-server < /dev/null" \
         | tail -1 || true
     fi
   fi
