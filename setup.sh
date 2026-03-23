@@ -230,6 +230,7 @@ PYEOF
     install_plugin "claude-mem" "claude-mem@thedotmack" "thedotmack/claude-mem" "claude-mem@thedotmack"
     install_plugin "ouroboros" "ouroboros@ouroboros" "Q00/ouroboros" "ouroboros@ouroboros"
     install_plugin "document-skills" "document-skills@anthropic" "anthropics/skills" "document-skills@anthropic-agent-skills"
+    install_plugin "oh-my-claudecode" "oh-my-claudecode" "https://github.com/Yeachan-Heo/oh-my-claudecode" "oh-my-claudecode"
   else
     log_and_print "    [SKIP] Claude Code not found"
   fi
@@ -316,7 +317,7 @@ cmd_doctor() {
   echo ""
   echo "[ Plugins ]"
   if command -v claude &>/dev/null; then
-    for p in "octo@nyldn" "claude-mem@thedotmack" "ouroboros@ouroboros" "document-skills@anthropic"; do
+    for p in "octo@nyldn" "claude-mem@thedotmack" "ouroboros@ouroboros" "document-skills@anthropic" "oh-my-claudecode"; do
       if claude plugin list 2>/dev/null | grep -q "$p"; then echo "  [OK] $p"
       else echo "  [MISS] $p"; WARNINGS=$((WARNINGS+1)); fi
     done
