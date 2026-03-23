@@ -222,15 +222,6 @@ PYEOF
         "claude mcp add serena -- uvx --from 'git+https://github.com/oraios/serena' serena start-mcp-server" \
         | tail -1 || true
     fi
-    # alphaXiv
-    if echo "$mcp_list" | grep -q "alphaxiv"; then
-      log_and_print "    [OK] alphaxiv already added"
-    else
-      log_and_print "    Adding alphaxiv..."
-      run_with_timeout "alphaxiv mcp add" \
-        "claude mcp add --transport http alphaxiv https://api.alphaxiv.org/mcp/v1" \
-        | tail -1 || true
-    fi
   fi
 
   # [10] Frameworks (GSD + RTK)
@@ -240,7 +231,7 @@ PYEOF
     log_and_print "    [OK] GSD already installed"
   else
     log_and_print "    Installing GSD..."
-    run_with_timeout "GSD install" "npx get-shit-done-cc@latest" | tail -3 || true
+    run_with_timeout "GSD install" "npx --yes get-shit-done-cc@latest" | tail -3 || true
   fi
   # RTK (cross-platform: macOS + Linux)
   if command -v rtk &>/dev/null; then
@@ -294,7 +285,7 @@ cmd_doctor() {
   echo ""
   echo "[ MCP servers ]"
   if command -v claude &>/dev/null; then
-    for m in codex-mcp gemini-mcp serena alphaxiv slack-server; do
+    for m in codex-mcp gemini-mcp serena slack-server; do
       if claude mcp list 2>/dev/null | grep -q "$m.*Connected"; then echo "  [OK] $m"
       else echo "  [MISS] $m"; WARNINGS=$((WARNINGS+1)); fi
     done
