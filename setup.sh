@@ -20,8 +20,16 @@ GEMINI_DIR="$HOME/.gemini"
 WARNINGS=0
 ERRORS=0
 SERENA_CONFIG="$HOME/.serena/serena_config.yml"
+SKIP_NETWORK=false
 SUBCMD="${1:-sync}"
 SUBCMD_ARG="${2:-}"
+
+# Parse flags
+for arg in "$@"; do
+  case "$arg" in
+    --skip-network) SKIP_NETWORK=true ;;
+  esac
+done
 
 # Logging
 LOG_DIR="$HOME/.cc-bootstrap/logs"
@@ -153,6 +161,16 @@ PYEOF
     make_link "$SCRIPT_DIR/ui/statusline/my-statusline.mjs" "$CONFIG_DIR/hud/my-statusline.mjs"
   fi
 
+  # Network-dependent steps (skip with --skip-network)
+  if $SKIP_NETWORK; then
+    log_and_print "[7-10] Skipped (--skip-network)"
+    log "=== sync complete (network steps skipped) ==="
+    echo ""
+    echo "=== sync complete (network steps skipped). Restart Claude Code to apply. ==="
+    echo "  Full log: $LOG_FILE"
+    return
+  fi
+
   # External tools
   log_and_print "[7] External tools"
   # codex-gemini-mcp
@@ -183,24 +201,28 @@ PYEOF
   # [8] Claude Code plugins
   log_and_print "[8] Plugins"
   if command -v claude &>/dev/null; then
+    log_and_print "    Fetching plugin list..."
     local plugin_list
-    plugin_list=$(timeout 30 claude plugin list 2>/dev/null) || {
-      log_and_print "    [WARN] claude plugin list timed out, skipping plugin checks"
+    plugin_list=$(timeout 30 claude plugin list < /dev/null 2>&1) || {
+      log_and_print "    [WARN] claude plugin list failed (timeout or error), skipping"
       plugin_list=""
     }
+    [ -n "$plugin_list" ] && log_and_print "    Plugin list retrieved."
 
     install_plugin() {
       local name="$1" match="$2" marketplace="$3" pkg="$4"
+      log_and_print "    [$name] checking..."
       if [ -n "$plugin_list" ] && echo "$plugin_list" | grep -q "$match"; then
-        log_and_print "    [OK] $name already installed"
+        log_and_print "    [$name] OK — already installed"
       elif [ -z "$plugin_list" ]; then
-        log_and_print "    [SKIP] $name (plugin list unavailable)"
+        log_and_print "    [$name] SKIP — plugin list unavailable"
       else
-        log_and_print "    Installing $name..."
         if [ -n "$marketplace" ]; then
-          run_with_timeout "$name marketplace add" "claude plugin marketplace add $marketplace" | tail -1 || true
+          log_and_print "    [$name] marketplace add..."
+          run_with_timeout "$name marketplace add" "claude plugin marketplace add $marketplace < /dev/null" | tail -1 || true
         fi
-        run_with_timeout "$name install" "claude plugin install $pkg" | tail -1 || true
+        log_and_print "    [$name] installing..."
+        run_with_timeout "$name install" "claude plugin install $pkg < /dev/null" | tail -1 || true
       fi
     }
 
@@ -215,11 +237,13 @@ PYEOF
   # [9] MCP servers
   log_and_print "[9] MCP servers"
   if command -v claude &>/dev/null; then
+    log_and_print "    Fetching MCP list..."
     local mcp_list
-    mcp_list=$(timeout 30 claude mcp list 2>/dev/null) || {
-      log_and_print "    [WARN] claude mcp list timed out"
+    mcp_list=$(timeout 30 claude mcp list < /dev/null 2>&1) || {
+      log_and_print "    [WARN] claude mcp list failed (timeout or error), skipping"
       mcp_list=""
     }
+    [ -n "$mcp_list" ] && log_and_print "    MCP list retrieved."
 
     # Serena
     if echo "$mcp_list" | grep -q "serena"; then
