@@ -184,12 +184,17 @@ PYEOF
   log_and_print "[8] Plugins"
   if command -v claude &>/dev/null; then
     local plugin_list
-    plugin_list=$(run_with_timeout "claude plugin list" "claude plugin list" 2>/dev/null) || plugin_list=""
+    plugin_list=$(timeout 30 claude plugin list 2>/dev/null) || {
+      log_and_print "    [WARN] claude plugin list timed out, skipping plugin checks"
+      plugin_list=""
+    }
 
     install_plugin() {
       local name="$1" match="$2" marketplace="$3" pkg="$4"
-      if echo "$plugin_list" | grep -q "$match"; then
+      if [ -n "$plugin_list" ] && echo "$plugin_list" | grep -q "$match"; then
         log_and_print "    [OK] $name already installed"
+      elif [ -z "$plugin_list" ]; then
+        log_and_print "    [SKIP] $name (plugin list unavailable)"
       else
         log_and_print "    Installing $name..."
         if [ -n "$marketplace" ]; then
@@ -211,7 +216,10 @@ PYEOF
   log_and_print "[9] MCP servers"
   if command -v claude &>/dev/null; then
     local mcp_list
-    mcp_list=$(run_with_timeout "claude mcp list" "claude mcp list" 2>/dev/null) || mcp_list=""
+    mcp_list=$(timeout 30 claude mcp list 2>/dev/null) || {
+      log_and_print "    [WARN] claude mcp list timed out"
+      mcp_list=""
+    }
 
     # Serena
     if echo "$mcp_list" | grep -q "serena"; then
