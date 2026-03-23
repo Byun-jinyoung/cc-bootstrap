@@ -262,8 +262,11 @@ PYEOF
   if ls "$CONFIG_DIR/commands/gsd"* &>/dev/null 2>&1; then
     log_and_print "    [OK] GSD already installed"
   else
-    log_and_print "    Installing GSD..."
-    run_with_timeout "GSD install" "npx --yes get-shit-done-cc@latest" | tail -3 || true
+    log_and_print "    Installing GSD (npm install -g)..."
+    run_with_timeout "GSD install" "npm install -g get-shit-done-cc@latest < /dev/null" | tail -3 || {
+      log_and_print "    [WARN] npm install -g failed, trying npx..."
+      run_with_timeout "GSD install (npx)" "npx --yes get-shit-done-cc@latest < /dev/null" | tail -3 || true
+    }
   fi
   # RTK (cross-platform: macOS + Linux)
   if command -v rtk &>/dev/null; then
