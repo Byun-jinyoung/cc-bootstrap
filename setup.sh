@@ -246,41 +246,27 @@ PYEOF
     }
     [ -n "$mcp_list" ] && log_and_print "    MCP list retrieved."
 
-    # codex-mcp
-    if echo "$mcp_list" | grep -q "codex-mcp"; then
-      log_and_print "    [OK] codex-mcp already added"
-    else
-      if command -v codex-mcp &>/dev/null; then
-        log_and_print "    Adding codex-mcp..."
-        run_with_timeout "codex-mcp add" \
-          "claude mcp add codex-mcp -- codex-mcp < /dev/null" \
-          | tail -1 || true
+    add_mcp() {
+      local name="$1" cmd="$2" binary="$3"
+      log_and_print "    [$name] checking..."
+      if echo "$mcp_list" | grep -q "$name"; then
+        log_and_print "    [$name] OK — already registered"
+      elif [ -n "$binary" ] && ! command -v "$binary" &>/dev/null; then
+        log_and_print "    [$name] SKIP — $binary binary not found"
       else
-        log_and_print "    [SKIP] codex-mcp binary not found"
+        log_and_print "    [$name] registering..."
+        local result
+        if result=$(run_with_timeout "$name mcp add" "$cmd < /dev/null" 2>&1); then
+          log_and_print "    [$name] registered successfully"
+        else
+          log_and_print "    [$name] registration failed — see $LOG_FILE"
+        fi
       fi
-    fi
-    # gemini-mcp
-    if echo "$mcp_list" | grep -q "gemini-mcp"; then
-      log_and_print "    [OK] gemini-mcp already added"
-    else
-      if command -v gemini-mcp &>/dev/null; then
-        log_and_print "    Adding gemini-mcp..."
-        run_with_timeout "gemini-mcp add" \
-          "claude mcp add gemini-mcp -- gemini-mcp < /dev/null" \
-          | tail -1 || true
-      else
-        log_and_print "    [SKIP] gemini-mcp binary not found"
-      fi
-    fi
-    # Serena
-    if echo "$mcp_list" | grep -q "serena"; then
-      log_and_print "    [OK] serena already added"
-    else
-      log_and_print "    Adding serena..."
-      run_with_timeout "serena mcp add" \
-        "claude mcp add serena -- uvx --from 'git+https://github.com/oraios/serena' serena start-mcp-server < /dev/null" \
-        | tail -1 || true
-    fi
+    }
+
+    add_mcp "codex-mcp" "claude mcp add codex-mcp -- codex-mcp" "codex-mcp"
+    add_mcp "gemini-mcp" "claude mcp add gemini-mcp -- gemini-mcp" "gemini-mcp"
+    add_mcp "serena" "claude mcp add serena -- uvx --from 'git+https://github.com/oraios/serena' serena start-mcp-server" ""
   fi
 
   # [10] Frameworks (GSD + RTK)
