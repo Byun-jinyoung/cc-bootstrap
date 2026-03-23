@@ -10,6 +10,7 @@
 #   validate  — Validate skill frontmatter
 #   update    — git pull → validate → sync → doctor
 #   install   — Legacy copy-based install (environments where symlinks don't work)
+#   init-project <path> — Initialize per-project settings (Serena registration, .claude/settings.local.json)
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -18,7 +19,53 @@ CODEX_DIR="$HOME/.codex"
 GEMINI_DIR="$HOME/.gemini"
 WARNINGS=0
 ERRORS=0
+SERENA_CONFIG="$HOME/.serena/serena_config.yml"
 SUBCMD="${1:-sync}"
+SUBCMD_ARG="${2:-}"
+
+# Logging
+LOG_DIR="$HOME/.cc-bootstrap/logs"
+mkdir -p "$LOG_DIR"
+LOG_FILE="$LOG_DIR/setup_$(date +%Y%m%d_%H%M%S).log"
+STEP_TIMEOUT=120  # seconds per step
+
+log() {
+  local msg="[$(date '+%H:%M:%S')] $*"
+  echo "$msg" >> "$LOG_FILE"
+}
+
+log_and_print() {
+  local msg="$*"
+  echo "$msg"
+  log "$msg"
+}
+
+# Run command with timeout and logging
+run_with_timeout() {
+  local label="$1"
+  shift
+  log "START: $label — cmd: $*"
+  local start_time=$(date +%s)
+  local output
+  if output=$(timeout "$STEP_TIMEOUT" bash -c "$*" 2>&1); then
+    local elapsed=$(( $(date +%s) - start_time ))
+    log "OK: $label (${elapsed}s)"
+    echo "$output"
+    return 0
+  else
+    local exit_code=$?
+    local elapsed=$(( $(date +%s) - start_time ))
+    if [ $exit_code -eq 124 ]; then
+      log "TIMEOUT: $label after ${STEP_TIMEOUT}s"
+      log_and_print "    [TIMEOUT] $label (>${STEP_TIMEOUT}s) — see $LOG_FILE"
+    else
+      log "FAIL: $label (exit=$exit_code, ${elapsed}s)"
+      log "  output: $output"
+      log_and_print "    [FAIL] $label (exit=$exit_code) — see $LOG_FILE"
+    fi
+    return $exit_code
+  fi
+}
 
 make_link() {
   local src="$1" dst="$2"
@@ -27,15 +74,20 @@ make_link() {
   fi
   mkdir -p "$(dirname "$dst")"
   ln -s "$src" "$dst"
-  echo "    [LINK] $(basename "$dst") → $src"
+  log_and_print "    [LINK] $(basename "$dst") → $src"
 }
 
 cmd_sync() {
+  log "=== cc-bootstrap sync started ==="
+  log "  Platform: $(uname -s) $(uname -m)"
+  log "  Shell: $SHELL"
+  log "  PATH: $PATH"
   echo "=== cc-bootstrap sync ==="
+  echo "  Log: $LOG_FILE"
   echo ""
   # Dependencies
   for cmd in git node npm python3; do
-    command -v $cmd &>/dev/null || { echo "[FAIL] $cmd not found"; ERRORS=$((ERRORS+1)); }
+    command -v $cmd &>/dev/null || { log_and_print "[FAIL] $cmd not found"; ERRORS=$((ERRORS+1)); }
   done
   [ $ERRORS -gt 0 ] && echo "FATAL: missing deps" && exit 1
 
@@ -102,110 +154,115 @@ PYEOF
   fi
 
   # External tools
-  echo "[7] External tools"
+  log_and_print "[7] External tools"
   # codex-gemini-mcp
   if command -v codex-mcp &>/dev/null; then
-    echo "    [OK] codex-mcp installed"
+    log_and_print "    [OK] codex-mcp installed"
   else
-    echo "    Installing codex-gemini-mcp fork..."
-    curl -sL https://raw.githubusercontent.com/Byun-jinyoung/codex-gemini-mcp/main/install.sh | bash
+    log_and_print "    Installing codex-gemini-mcp fork..."
+    run_with_timeout "codex-gemini-mcp install" \
+      "curl -sL https://raw.githubusercontent.com/Byun-jinyoung/codex-gemini-mcp/main/install.sh | bash" \
+      | tail -3 || true
   fi
   # gemini-swarm
   if command -v gemini &>/dev/null; then
-    if gemini --list-extensions 2>&1 | grep -q "gemini-swarm"; then
-      echo "    [OK] gemini-swarm installed"
+    if run_with_timeout "gemini list-extensions" "gemini --list-extensions" 2>/dev/null | grep -q "gemini-swarm"; then
+      log_and_print "    [OK] gemini-swarm installed"
     else
-      gemini extensions install https://github.com/tmdgusya/gemini-swarm --consent 2>&1 | tail -1
+      run_with_timeout "gemini-swarm install" \
+        "gemini extensions install https://github.com/tmdgusya/gemini-swarm --consent" \
+        | tail -1 || true
     fi
   fi
   # OMC patches
-  [ -f "$SCRIPT_DIR/patches/omc/omc-render-model-first.sh" ] && \
-    bash "$SCRIPT_DIR/patches/omc/omc-render-model-first.sh" 2>&1 | sed 's/^/    /'
+  if [ -f "$SCRIPT_DIR/patches/omc/omc-render-model-first.sh" ]; then
+    run_with_timeout "OMC patches" "bash '$SCRIPT_DIR/patches/omc/omc-render-model-first.sh'" \
+      | sed 's/^/    /' || true
+  fi
 
   # [8] Claude Code plugins
-  echo "[8] Plugins"
+  log_and_print "[8] Plugins"
   if command -v claude &>/dev/null; then
-    # Octo (Claude Octopus)
-    if claude plugin list 2>/dev/null | grep -q "octo@nyldn"; then
-      echo "    [OK] octo already installed"
-    else
-      echo "    Installing octo..."
-      claude plugin marketplace add https://github.com/nyldn/claude-octopus.git 2>&1 | tail -1
-      claude plugin install octo@nyldn-plugins 2>&1 | tail -1
-    fi
-    # Claude-mem
-    if claude plugin list 2>/dev/null | grep -q "claude-mem@thedotmack"; then
-      echo "    [OK] claude-mem already installed"
-    else
-      echo "    Installing claude-mem..."
-      claude plugin marketplace add thedotmack/claude-mem 2>&1 | tail -1
-      claude plugin install claude-mem@thedotmack 2>&1 | tail -1
-    fi
-    # Ouroboros
-    if claude plugin list 2>/dev/null | grep -q "ouroboros@ouroboros"; then
-      echo "    [OK] ouroboros already installed"
-    else
-      echo "    Installing ouroboros..."
-      claude plugin marketplace add Q00/ouroboros 2>&1 | tail -1
-      claude plugin install ouroboros@ouroboros 2>&1 | tail -1
-    fi
-    # Document skills
-    if claude plugin list 2>/dev/null | grep -q "document-skills@anthropic"; then
-      echo "    [OK] document-skills already installed"
-    else
-      echo "    Installing document-skills..."
-      claude plugin install document-skills@anthropic-agent-skills 2>&1 | tail -1
-    fi
+    local plugin_list
+    plugin_list=$(run_with_timeout "claude plugin list" "claude plugin list" 2>/dev/null) || plugin_list=""
+
+    install_plugin() {
+      local name="$1" match="$2" marketplace="$3" pkg="$4"
+      if echo "$plugin_list" | grep -q "$match"; then
+        log_and_print "    [OK] $name already installed"
+      else
+        log_and_print "    Installing $name..."
+        if [ -n "$marketplace" ]; then
+          run_with_timeout "$name marketplace add" "claude plugin marketplace add $marketplace" | tail -1 || true
+        fi
+        run_with_timeout "$name install" "claude plugin install $pkg" | tail -1 || true
+      fi
+    }
+
+    install_plugin "octo" "octo@nyldn" "https://github.com/nyldn/claude-octopus.git" "octo@nyldn-plugins"
+    install_plugin "claude-mem" "claude-mem@thedotmack" "thedotmack/claude-mem" "claude-mem@thedotmack"
+    install_plugin "ouroboros" "ouroboros@ouroboros" "Q00/ouroboros" "ouroboros@ouroboros"
+    install_plugin "document-skills" "document-skills@anthropic" "" "document-skills@anthropic-agent-skills"
   else
-    echo "    [SKIP] Claude Code not found"
+    log_and_print "    [SKIP] Claude Code not found"
   fi
 
   # [9] MCP servers
-  echo "[9] MCP servers"
+  log_and_print "[9] MCP servers"
   if command -v claude &>/dev/null; then
+    local mcp_list
+    mcp_list=$(run_with_timeout "claude mcp list" "claude mcp list" 2>/dev/null) || mcp_list=""
+
     # Serena
-    if claude mcp list 2>/dev/null | grep -q "serena.*Connected"; then
-      echo "    [OK] serena already connected"
+    if echo "$mcp_list" | grep -q "serena"; then
+      log_and_print "    [OK] serena already added"
     else
-      echo "    Adding serena..."
-      claude mcp add serena -- uvx --from "git+https://github.com/oraios/serena" serena start-mcp-server 2>&1 | tail -1
+      log_and_print "    Adding serena..."
+      run_with_timeout "serena mcp add" \
+        "claude mcp add serena -- uvx --from 'git+https://github.com/oraios/serena' serena start-mcp-server" \
+        | tail -1 || true
     fi
     # alphaXiv
-    if claude mcp list 2>/dev/null | grep -q "alphaxiv.*Connected"; then
-      echo "    [OK] alphaxiv already connected"
+    if echo "$mcp_list" | grep -q "alphaxiv"; then
+      log_and_print "    [OK] alphaxiv already added"
     else
-      echo "    Adding alphaxiv..."
-      claude mcp add --transport http alphaxiv https://api.alphaxiv.org/mcp/v1 2>&1 | tail -1
+      log_and_print "    Adding alphaxiv..."
+      run_with_timeout "alphaxiv mcp add" \
+        "claude mcp add --transport http alphaxiv https://api.alphaxiv.org/mcp/v1" \
+        | tail -1 || true
     fi
   fi
 
   # [10] Frameworks (GSD + RTK)
-  echo "[10] Frameworks"
+  log_and_print "[10] Frameworks"
   # GSD
   if ls "$CONFIG_DIR/commands/gsd"* &>/dev/null 2>&1; then
-    echo "    [OK] GSD already installed"
+    log_and_print "    [OK] GSD already installed"
   else
-    echo "    Installing GSD..."
-    npx get-shit-done-cc@latest 2>&1 | tail -3
+    log_and_print "    Installing GSD..."
+    run_with_timeout "GSD install" "npx get-shit-done-cc@latest" | tail -3 || true
   fi
   # RTK (cross-platform: macOS + Linux)
   if command -v rtk &>/dev/null; then
-    echo "    [OK] RTK $(rtk --version 2>/dev/null)"
+    log_and_print "    [OK] RTK $(rtk --version 2>/dev/null)"
   else
-    echo "    Installing RTK..."
-    curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/master/install.sh | sh 2>&1 | tail -3
-    # Ensure ~/.local/bin is in PATH for current session
+    log_and_print "    Installing RTK..."
+    run_with_timeout "RTK install" \
+      "curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/master/install.sh | sh" \
+      | tail -3 || true
     export PATH="$HOME/.local/bin:$PATH"
     if command -v rtk &>/dev/null; then
       rtk init -g 2>&1 | tail -1
-      echo "    [OK] RTK installed: $(rtk --version 2>/dev/null)"
+      log_and_print "    [OK] RTK installed: $(rtk --version 2>/dev/null)"
     else
-      echo "    [WARN] RTK install failed. See https://github.com/rtk-ai/rtk"
+      log_and_print "    [WARN] RTK install failed. See https://github.com/rtk-ai/rtk"
     fi
   fi
 
+  log "=== sync complete ==="
   echo ""
   echo "=== sync complete. Restart Claude Code to apply. ==="
+  echo "  Full log: $LOG_FILE"
 }
 
 cmd_doctor() {
@@ -294,8 +351,131 @@ cmd_install() {
   echo "  Legacy install complete."
 }
 
+cmd_init_project() {
+  local project_path="$1"
+  if [ -z "$project_path" ]; then
+    echo "Usage: ./setup.sh init-project <path>"
+    echo "  Example: ./setup.sh init-project ~/PROject/boltz2"
+    exit 1
+  fi
+
+  # Resolve to absolute path
+  project_path="$(cd "$project_path" 2>/dev/null && pwd)" || {
+    echo "[FAIL] Directory not found: $1"
+    exit 1
+  }
+  local project_name="$(basename "$project_path")"
+  echo "=== cc-bootstrap init-project: $project_name ==="
+  echo "  Path: $project_path"
+  echo ""
+
+  # [1] Register with Serena
+  echo "[1] Serena project registration"
+  if [ -f "$SERENA_CONFIG" ]; then
+    if grep -q "$project_path" "$SERENA_CONFIG" 2>/dev/null; then
+      echo "    [OK] Already registered in serena_config.yml"
+    else
+      # Append project path to projects list
+      python3 << PYEOF
+import sys
+try:
+    import yaml
+except ImportError:
+    print("    [WARN] PyYAML missing. pip install pyyaml")
+    sys.exit(0)
+
+with open("$SERENA_CONFIG") as f:
+    config = yaml.safe_load(f) or {}
+
+projects = config.get("projects", []) or []
+if "$project_path" not in projects:
+    projects.append("$project_path")
+    config["projects"] = projects
+    with open("$SERENA_CONFIG", "w") as f:
+        yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
+    print("    [OK] Registered: $project_path")
+else:
+    print("    [OK] Already registered")
+PYEOF
+    fi
+  else
+    echo "    [SKIP] ~/.serena/serena_config.yml not found (Serena not installed?)"
+  fi
+
+  # [2] Create project .serena directory
+  echo "[2] Serena project data directory"
+  if [ -d "$project_path/.serena" ]; then
+    echo "    [OK] $project_path/.serena/ already exists"
+  else
+    mkdir -p "$project_path/.serena"
+    echo "    [OK] Created $project_path/.serena/"
+  fi
+
+  # [3] Create .claude/settings.local.json if not exists
+  echo "[3] Claude Code project settings"
+  local claude_project_dir="$project_path/.claude"
+  local settings_local="$claude_project_dir/settings.local.json"
+  if [ -f "$settings_local" ]; then
+    echo "    [OK] $settings_local already exists"
+  else
+    mkdir -p "$claude_project_dir"
+    cat > "$settings_local" << JSONEOF
+{
+  "permissions": {},
+  "env": {}
+}
+JSONEOF
+    echo "    [OK] Created $settings_local"
+  fi
+
+  # [4] Create project CLAUDE.md if not exists
+  echo "[4] Project CLAUDE.md"
+  if [ -f "$project_path/CLAUDE.md" ]; then
+    echo "    [OK] CLAUDE.md already exists"
+  else
+    cat > "$project_path/CLAUDE.md" << MDEOF
+# $project_name
+
+## 기술 스택
+
+| 분류 | 도구 |
+|------|------|
+| **프레임워크** | |
+| **Type Hints** | jaxtyping (필수) |
+| **Docstring** | Google style |
+
+## 작업 규칙
+
+### 금지 사항
+- 불확실한 내용을 추측으로 답변하지 마세요
+- 파일을 읽지 않고 코드에 대해 가정하지 마세요
+- 질문 없이 애매한 요구사항을 임의로 해석하지 마세요
+MDEOF
+    echo "    [OK] Created CLAUDE.md (edit to customize)"
+  fi
+
+  # [5] Add .serena to .gitignore if not already
+  echo "[5] .gitignore"
+  if [ -f "$project_path/.gitignore" ]; then
+    if grep -q "^\.serena" "$project_path/.gitignore" 2>/dev/null; then
+      echo "    [OK] .serena already in .gitignore"
+    else
+      echo ".serena/" >> "$project_path/.gitignore"
+      echo "    [OK] Added .serena/ to .gitignore"
+    fi
+  else
+    echo ".serena/" > "$project_path/.gitignore"
+    echo "    [OK] Created .gitignore with .serena/"
+  fi
+
+  echo ""
+  echo "=== init-project complete: $project_name ==="
+  echo "  Next: cd $project_path && claude"
+}
+
 case "$SUBCMD" in
   sync) cmd_sync ;; doctor) cmd_doctor ;; validate) cmd_validate ;;
   update) cmd_update ;; install) cmd_install ;;
-  *) echo "Usage: ./setup.sh {sync|doctor|validate|update|install}"; exit 1 ;;
+  init-project) cmd_init_project "$SUBCMD_ARG" ;;
+  *) echo "Usage: ./setup.sh {sync|doctor|validate|update|install|init-project <path>}"; exit 1 ;;
 esac
