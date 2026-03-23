@@ -283,7 +283,7 @@ PYEOF
       | tail -3 || true
     export PATH="$HOME/.local/bin:$PATH"
     if command -v rtk &>/dev/null; then
-      rtk init -g 2>&1 | tail -1
+      run_with_timeout "RTK init" "rtk init -g < /dev/null" | tail -1 || true
       log_and_print "    [OK] RTK installed: $(rtk --version 2>/dev/null)"
     else
       log_and_print "    [WARN] RTK install failed. See https://github.com/rtk-ai/rtk"
