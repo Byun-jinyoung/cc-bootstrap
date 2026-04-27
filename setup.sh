@@ -385,6 +385,24 @@ PYEOF
       log_and_print "    [WARN] RTK install failed. See https://github.com/rtk-ai/rtk"
     fi
   fi
+  # code-review-graph (CRG) — required by triangle-review + codebase-scan
+  # CRG requires Python >=3.10. Use `uv tool install` for isolated env that works
+  # regardless of system Python version. Fall back to pip3 only when uv missing.
+  export PATH="$HOME/.local/bin:$PATH"
+  if command -v code-review-graph &>/dev/null; then
+    log_and_print "    [OK] CRG $(code-review-graph --version 2>&1 | head -1)"
+  elif command -v uv &>/dev/null; then
+    log_and_print "    Installing code-review-graph (uv tool)..."
+    run_with_timeout "CRG install (uv)" "uv tool install code-review-graph < /dev/null" \
+      | tail -2 || true
+    if command -v code-review-graph &>/dev/null; then
+      log_and_print "    [OK] CRG installed: $(code-review-graph --version 2>&1 | head -1)"
+    else
+      log_and_print "    [WARN] CRG install via uv failed — see $LOG_FILE"
+    fi
+  else
+    log_and_print "    [WARN] CRG missing. Install uv first, or pip3 install --user code-review-graph (Python>=3.10)"
+  fi
 
   log "=== sync complete ==="
   echo ""

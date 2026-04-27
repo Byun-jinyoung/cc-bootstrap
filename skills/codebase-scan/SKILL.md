@@ -36,8 +36,16 @@ description: Orchestrated codebase comprehension for unfamiliar projects. Runs c
 
 필수 설치 (한 번만):
 ```bash
-pip3 install --user code-review-graph   # L1 — 반드시 필요
+# 권장: 시스템 Python 버전과 무관하게 isolated env로 설치
+uv tool install code-review-graph        # L1 — 반드시 필요
+
+# 대체: 시스템 Python ≥ 3.10 환경에서만 동작
+pip3 install --user code-review-graph
 ```
+
+> CRG는 Python ≥ 3.10을 요구한다. 시스템 Python이 3.8/3.9이면 `pip3` 경로는
+> "No matching distribution"으로 실패하므로 `uv tool install`을 사용한다.
+> `setup.sh sync`는 [10] 단계에서 자동 설치를 시도한다.
 
 serena는 user scope에 이미 등록되어 있어야 함 (없으면 Phase 2에서 tree-sitter 폴백).
 
