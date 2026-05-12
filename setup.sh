@@ -94,6 +94,39 @@ make_link() {
   log_and_print "    [LINK] $(basename "$dst") → $src"
 }
 
+# Verify codex-mcp / gemini-mcp install integrity.
+# Past failure modes this guards against:
+#   1. JS entry files missing +x bit  → "Permission denied" on spawn  → auto-fixed via chmod
+#   2. Original donghae0414 upstream installed instead of Byun-jinyoung fork
+#      → missing session_id resume + gemini -y flag  → detected via dist feature grep
+#   3. Dangling /usr/bin symlink (target deleted/renamed)  → readlink -f resolves nothing
+# Returns 0 on healthy install, 1 if reinstall needed.
+# Side effects: chmod +x on entry files (auto-repair, idempotent).
+verify_codex_gemini_mcp() {
+  local bin entry dist_dir
+  for bin in codex-mcp gemini-mcp; do
+    command -v "$bin" &>/dev/null || return 1
+    entry="$(readlink -f "$(command -v "$bin")")"
+    [ -f "$entry" ] || return 1
+    [ -x "$entry" ] || chmod +x "$entry" 2>/dev/null || return 1
+  done
+  # entry path: <dist>/mcp/{codex,gemini}-stdio-entry.js
+  entry="$(readlink -f "$(command -v codex-mcp)")"
+  dist_dir="$(dirname "$(dirname "$entry")")"
+  # Fork-only features (Byun-jinyoung): session_id resume, gemini -y
+  grep -q 'session_id' "$dist_dir/providers/codex.js" 2>/dev/null || return 1
+  grep -q '"-y"' "$dist_dir/providers/gemini.js" 2>/dev/null || return 1
+  return 0
+}
+
+# Smoke test: spawn MCP binary, confirm "started on stdio" handshake.
+# Catches runtime errors that pass static integrity check (e.g. missing dep, bad shebang).
+mcp_spawn_check() {
+  local bin="$1"
+  command -v "$bin" &>/dev/null || return 1
+  timeout 3 "$bin" </dev/null 2>&1 | head -1 | grep -q 'started on stdio'
+}
+
 cmd_sync() {
   log "=== cc-bootstrap sync started ==="
   log "  Platform: $(uname -s) $(uname -m)"
@@ -182,14 +215,21 @@ PYEOF
 
   # External tools
   log_and_print "[7] External tools"
-  # codex-gemini-mcp
-  if command -v codex-mcp &>/dev/null; then
-    log_and_print "    [OK] codex-mcp installed"
+  # codex-gemini-mcp (Byun-jinyoung fork — required for session_id resume + gemini -y)
+  # Integrity check covers: binary present, exec bit set, fork features in dist.
+  # Auto-repairs missing exec bit; reinstalls if fork features absent.
+  if verify_codex_gemini_mcp; then
+    log_and_print "    [OK] codex-mcp + gemini-mcp (fork integrity verified)"
   else
-    log_and_print "    Installing codex-gemini-mcp fork..."
+    log_and_print "    Installing/repairing codex-gemini-mcp fork..."
     run_with_timeout "codex-gemini-mcp install" \
       "curl -sL https://raw.githubusercontent.com/Byun-jinyoung/codex-gemini-mcp/main/install.sh | bash" \
       | tail -3 || true
+    if verify_codex_gemini_mcp; then
+      log_and_print "    [OK] codex-gemini-mcp fork installed and verified"
+    else
+      log_and_print "    [WARN] codex-gemini-mcp install ran but integrity still failing — see $LOG_FILE"
+    fi
   fi
   # gemini-swarm
   if command -v gemini &>/dev/null; then
@@ -396,7 +436,8 @@ PYEOF
   # [10] Frameworks (GSD + RTK)
   log_and_print "[10] Frameworks"
   # GSD
-  if ls "$CONFIG_DIR/commands/gsd"* &>/dev/null 2>&1; then
+  # Detect via either old commands/ path or current skills/ layout (GSD restructured upstream).
+  if ls "$CONFIG_DIR/commands/gsd"* &>/dev/null 2>&1 || ls -d "$CONFIG_DIR/skills/gsd-"* &>/dev/null 2>&1; then
     log_and_print "    [OK] GSD already installed"
   else
     log_and_print "    Installing GSD (npx get-shit-done-cc)..."
@@ -420,10 +461,28 @@ PYEOF
       | tail -3 || true
     export PATH="$HOME/.local/bin:$PATH"
     if command -v rtk &>/dev/null; then
-      run_with_timeout "RTK init" "rtk init -g < /dev/null" | tail -1 || true
       log_and_print "    [OK] RTK installed: $(rtk --version 2>/dev/null)"
     else
       log_and_print "    [WARN] RTK install failed. See https://github.com/rtk-ai/rtk"
+    fi
+  fi
+  # RTK hook integrity (independent of binary install).
+  # Past failure mode: binary present but `rtk init -g` never run → no PreToolUse Bash
+  # hook in settings.json → CLAUDE.md's "auto-rewrite" promise broken, 0 token savings.
+  # Probe: grep settings.json directly for "rtk hook claude" (rtk init writes this).
+  # Avoid using `rtk discover`'s warning — it's flipped by rtk-internal state, not by
+  # actual settings.json patch, so it's a false positive after a no-op interactive init.
+  if command -v rtk &>/dev/null; then
+    if grep -q 'rtk hook claude' "$CONFIG_DIR/settings.json" 2>/dev/null; then
+      log_and_print "    [OK] RTK hook already active in settings.json"
+    else
+      log_and_print "    RTK hook missing — running 'rtk init -g --auto-patch'..."
+      run_with_timeout "RTK init -g" "rtk init -g --auto-patch < /dev/null" | tail -3 || true
+      if grep -q 'rtk hook claude' "$CONFIG_DIR/settings.json" 2>/dev/null; then
+        log_and_print "    [OK] RTK hook installed (token rewrite active)"
+      else
+        log_and_print "    [WARN] RTK hook still missing after init — see $LOG_FILE"
+      fi
     fi
   fi
   # code-review-graph (CRG) — required by triangle-review + codebase-scan
@@ -492,6 +551,25 @@ cmd_doctor() {
   fi
 
   echo ""
+  echo "[ codex-gemini-mcp integrity ]"
+  if verify_codex_gemini_mcp; then
+    entry_path="$(readlink -f "$(command -v codex-mcp 2>/dev/null)" 2>/dev/null)"
+    echo "  [OK] fork features present (session_id, gemini -y)"
+    echo "        resolved: ${entry_path:-?}"
+  else
+    echo "  [FAIL] codex-gemini-mcp integrity — run 'setup.sh sync' to repair"
+    WARNINGS=$((WARNINGS+1))
+  fi
+  for bin in codex-mcp gemini-mcp; do
+    if mcp_spawn_check "$bin"; then
+      echo "  [OK] $bin stdio handshake"
+    else
+      echo "  [FAIL] $bin stdio spawn — check exec bit / runtime deps"
+      WARNINGS=$((WARNINGS+1))
+    fi
+  done
+
+  echo ""
   echo "[ MCP servers (Codex/Gemini for triangle-review) ]"
   for entry in "$CODEX_DIR/config.toml:[mcp_servers.serena]:codex serena" \
                "$CODEX_DIR/config.toml:[mcp_servers.code-review-graph]:codex code-review-graph"; do
@@ -532,10 +610,20 @@ PYEOF
 
   echo ""
   echo "[ Frameworks ]"
-  if ls "$CONFIG_DIR/commands/gsd"* &>/dev/null 2>&1; then echo "  [OK] GSD"
+  if ls "$CONFIG_DIR/commands/gsd"* &>/dev/null 2>&1 || ls -d "$CONFIG_DIR/skills/gsd-"* &>/dev/null 2>&1; then
+    echo "  [OK] GSD ($(ls -d "$CONFIG_DIR/skills/gsd-"* 2>/dev/null | wc -l) skills)"
   else echo "  [MISS] GSD"; WARNINGS=$((WARNINGS+1)); fi
-  if command -v rtk &>/dev/null; then echo "  [OK] RTK"
-  else echo "  [MISS] RTK"; WARNINGS=$((WARNINGS+1)); fi
+  if command -v rtk &>/dev/null; then
+    echo "  [OK] RTK $(rtk --version 2>/dev/null)"
+    if grep -q 'rtk hook claude' "$CONFIG_DIR/settings.json" 2>/dev/null; then
+      echo "  [OK] RTK hook active in settings.json"
+    else
+      echo "  [FAIL] RTK hook NOT in settings.json — run 'setup.sh sync' or 'rtk init -g --auto-patch'"
+      WARNINGS=$((WARNINGS+1))
+    fi
+  else
+    echo "  [MISS] RTK"; WARNINGS=$((WARNINGS+1))
+  fi
 
   echo ""
   [ $WARNINGS -gt 0 ] && echo "  $WARNINGS item(s) missing." || echo "  All checks passed."
