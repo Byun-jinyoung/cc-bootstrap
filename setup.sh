@@ -467,21 +467,61 @@ PYEOF
     fi
   fi
   # RTK hook integrity (independent of binary install).
-  # Past failure mode: binary present but `rtk init -g` never run → no PreToolUse Bash
-  # hook in settings.json → CLAUDE.md's "auto-rewrite" promise broken, 0 token savings.
-  # Probe: grep settings.json directly for "rtk hook claude" (rtk init writes this).
-  # Avoid using `rtk discover`'s warning — it's flipped by rtk-internal state, not by
-  # actual settings.json patch, so it's a false positive after a no-op interactive init.
+  # Past failure modes:
+  #   1. Binary present but `rtk init -g` never run → 0 token savings, broken auto-rewrite.
+  #   2. RTK 0.31.0 doesn't support --auto-patch → exits 0 silently, no patch applied.
+  # Strategy: try `rtk init -g --auto-patch` first (modern RTK + side effects: RTK.md,
+  # CLAUDE.md ref). If hook still absent → direct JSON merge via python3 (version-agnostic,
+  # idempotent). Probe: grep settings.json for "rtk hook claude" — not `rtk discover`
+  # (its warning is flipped by rtk-internal state, false negative after no-op init).
   if command -v rtk &>/dev/null; then
     if grep -q 'rtk hook claude' "$CONFIG_DIR/settings.json" 2>/dev/null; then
       log_and_print "    [OK] RTK hook already active in settings.json"
     else
       log_and_print "    RTK hook missing — running 'rtk init -g --auto-patch'..."
       run_with_timeout "RTK init -g" "rtk init -g --auto-patch < /dev/null" | tail -3 || true
+      # Fallback: direct JSON merge (covers --auto-patch unsupported / silent-skip).
+      if ! grep -q 'rtk hook claude' "$CONFIG_DIR/settings.json" 2>/dev/null; then
+        if command -v python3 &>/dev/null; then
+          log_and_print "    rtk init didn't patch settings.json — direct JSON merge..."
+          python3 - "$CONFIG_DIR/settings.json" << 'PYEOF' | sed 's/^/    /'
+import json, sys
+from pathlib import Path
+p = Path(sys.argv[1])
+data = {}
+if p.exists():
+    try:
+        data = json.loads(p.read_text())
+    except Exception as e:
+        print(f"[WARN] settings.json unparseable ({e}) — aborting merge")
+        sys.exit(0)
+hooks = data.setdefault("hooks", {})
+pre = hooks.setdefault("PreToolUse", [])
+already = any(
+    isinstance(e, dict) and e.get("matcher") == "Bash" and any(
+        isinstance(h, dict) and h.get("command") == "rtk hook claude"
+        for h in e.get("hooks", [])
+    ) for e in pre
+)
+if already:
+    print("[OK] RTK hook already present (no change)")
+else:
+    pre.append({
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": "rtk hook claude"}],
+    })
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(data, indent=2))
+    print("[OK] RTK hook merged into settings.json")
+PYEOF
+        else
+          log_and_print "    [WARN] python3 missing — cannot fallback-patch RTK hook"
+        fi
+      fi
       if grep -q 'rtk hook claude' "$CONFIG_DIR/settings.json" 2>/dev/null; then
         log_and_print "    [OK] RTK hook installed (token rewrite active)"
       else
-        log_and_print "    [WARN] RTK hook still missing after init — see $LOG_FILE"
+        log_and_print "    [WARN] RTK hook still missing — manual patch required (see $LOG_FILE)"
       fi
     fi
   fi
