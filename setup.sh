@@ -407,6 +407,19 @@ cmd_sync() {
   done
   [ $ERRORS -gt 0 ] && echo "FATAL: missing deps" && exit 1
 
+  # Ensure user's npm global bin is on PATH for this sync run, so later checks
+  # like `command -v context-mode` succeed even on shells that haven't added
+  # it themselves. Users on a per-user npm prefix (e.g. ~/.npm-global) should
+  # still add it to their shell rc — see post-sync instructions.
+  if command -v npm &>/dev/null; then
+    local npm_bin
+    npm_bin="$(npm config get prefix 2>/dev/null)/bin"
+    if [ -d "$npm_bin" ] && [[ ":$PATH:" != *":$npm_bin:"* ]]; then
+      export PATH="$npm_bin:$PATH"
+      log "  Added npm global bin to PATH: $npm_bin"
+    fi
+  fi
+
   # Claude commands
   echo "[1] Claude commands"
   mkdir -p "$CONFIG_DIR/commands"
@@ -527,6 +540,13 @@ PYEOF
     log_and_print "    Installing context-mode (npm global)..."
     run_with_timeout "context-mode install" "npm install -g context-mode < /dev/null" \
       | tail -3 || true
+    # Verify post-install (install may succeed but bin dir may not be on PATH).
+    if command -v context-mode &>/dev/null; then
+      log_and_print "    [OK] context-mode installed -> $(command -v context-mode)"
+    else
+      log_and_print "    [WARN] context-mode still not on PATH after install."
+      log_and_print "           Run: echo 'export PATH=\"\$(npm config get prefix)/bin:\$PATH\"' >> ~/.bashrc"
+    fi
   fi
   # codex-gemini-mcp (Byun-jinyoung fork — required for session_id resume + gemini -y)
   # Integrity check covers: binary present, exec bit set, fork features in dist.
