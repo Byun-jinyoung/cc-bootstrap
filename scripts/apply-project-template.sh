@@ -82,26 +82,15 @@ else
   FILES=("AGENTS.md" "CLAUDE.md" "GEMINI.md")
 fi
 
-loader_content() {
+# block_content — emits the managed-block body for a style.
+# Inline mode: the full template content is copied in, so the rules are
+# auto-loaded with the project file itself (no runtime pointer dependency).
+block_content() {
   local style="$1"
   local template="$2"
-  local display_template="$template"
-  display_template="${display_template/#$HOME/~}"
-
-  printf '# oh-my-setting Loader\n\n'
-  printf 'Read `PROJECT.md` first. Project work starts only after it is filled and confirmed.\n'
-  printf 'Then follow `%s` for shared `%s` rules.\n' "$display_template" "$style"
-  printf 'Project rules override global defaults.\n\n'
-  printf '## Local Agent Rules\n\n'
-  printf -- '- New/broad work or draft `PROJECT.md`: interview -> update `PROJECT.md` -> confirm -> code.\n'
-  printf -- '- New/major docs: interview -> concrete outline -> confirm -> write.\n'
-  if [ "$style" = "ml" ]; then
-    printf -- '- New ML project: create only the standard skeleton before the interview/spec gate.\n'
-  elif [ "$style" = "slurm" ]; then
-    printf -- '- Slurm is an overlay; ask before partition/account/time/GPU/CPU/memory changes.\n'
-  fi
-  printf -- '- Keep edits task-scoped; do not rewrite unrelated files.\n'
-  printf -- '- End with: changed, verified, not verified, next command.\n'
+  printf '> Project rules — cc-bootstrap `%s` template (inlined by apply-project-template.sh).\n' "$style"
+  printf '> Read `PROJECT.md` before starting work; project rules override global defaults.\n\n'
+  cat "$template"
 }
 
 project_content() {
@@ -233,7 +222,7 @@ apply_one() {
 
   {
     printf '%s\n\n' "$begin"
-    loader_content "$style" "$template"
+    block_content "$style" "$template"
     printf '\n%s\n' "$end"
   } >> "$tmp"
 

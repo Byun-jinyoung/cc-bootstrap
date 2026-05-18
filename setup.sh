@@ -353,14 +353,15 @@ PYEOF
 }
 
 # Assemble each CLI's global instruction file from:
-#   Layer A — AGENTS.md          (shared, CLI-agnostic coding rules)
+#   Layer A — rules/*.md          (shared, CLI-agnostic coding rules, SRP modules
+#                                  concatenated in filename order: 00, 10, ... 70)
 #   Layer B — runtimes/<cli>/tools.md  (CLI-specific tool guidance)
 # Regenerated on every sync; idempotent. No @-include — concatenated so it
 # works regardless of per-CLI include support.
 assemble_global_rules() {
-  local layer_a="$SCRIPT_DIR/AGENTS.md"
-  if [ ! -f "$layer_a" ]; then
-    log_and_print "    [WARN] Layer A missing ($layer_a) — skipping global rule assembly"
+  local rules_dir="$SCRIPT_DIR/rules"
+  if [ ! -d "$rules_dir" ] || ! ls "$rules_dir"/*.md >/dev/null 2>&1; then
+    log_and_print "    [WARN] Layer A missing ($rules_dir/*.md) — skipping global rule assembly"
     return
   fi
   local cli dir tools target
@@ -376,8 +377,8 @@ assemble_global_rules() {
       continue
     fi
     mkdir -p "$dir"
-    { cat "$layer_a"; printf '\n'; cat "$tools"; } > "$target"
-    log_and_print "    [OK] $target (Layer A + $cli tools)"
+    { cat "$rules_dir"/*.md; printf '\n'; cat "$tools"; } > "$target"
+    log_and_print "    [OK] $target (Layer A rules/ + $cli tools)"
   done
 }
 
