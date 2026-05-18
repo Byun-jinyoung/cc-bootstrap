@@ -1,11 +1,3 @@
-# Global Instructions
-
-## Reliability Rules (MUST follow)
-
-1. **No bluffing**: If you don't know, say "I don't know" or "I need to verify." Never fabricate an answer.
-2. **Fact-based work only**: All responses must be grounded in actual code, execution results, documentation, or verifiable facts.
-3. **No baseless speculation**: Do not guess, assume, or speculate without evidence. If reasoning is needed, explicitly state the basis and mark uncertainty.
-
 # context-mode — MANDATORY routing rules
 
 context-mode MCP tools available. Rules protect context window from flooding. One unrouted command dumps 56 KB into context.
@@ -114,5 +106,3 @@ which rtk             # Verify correct binary
 
 All other commands are automatically rewritten by the Gemini CLI hook.
 Example: `git status` → `rtk git status` (transparent, 0 tokens overhead)
-
-Refer to GEMINI.md for full command reference.

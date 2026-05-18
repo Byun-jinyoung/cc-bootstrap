@@ -256,26 +256,8 @@ for (const [event, spec] of Object.entries(wanted)) {
 }
 fs.writeFileSync(hooksPath, JSON.stringify(data, null, 2) + "\n");
 console.log("[OK] Codex: context-mode hooks installed in hooks.json");
-
-const npmRoot = (() => {
-  try {
-    return require("child_process").execFileSync("npm", ["root", "-g"], { encoding: "utf8" }).trim();
-  } catch {
-    return "";
-  }
-})();
-const routeSrc = npmRoot ? path.join(npmRoot, "context-mode", "configs", "codex", "AGENTS.md") : "";
-const routeDst = path.join(codexDir, "AGENTS.md");
-if (!routeSrc || !fs.existsSync(routeSrc)) {
-  console.log("[WARN] Codex: context-mode routing AGENTS.md not found; skipping");
-} else if (!fs.existsSync(routeDst)) {
-  fs.copyFileSync(routeSrc, routeDst);
-  console.log("[OK] Codex: copied context-mode routing instructions to ~/.codex/AGENTS.md");
-} else if (fs.readFileSync(routeDst, "utf8").includes("context-mode")) {
-  console.log("[OK] Codex: ~/.codex/AGENTS.md already has context-mode instructions");
-} else {
-  console.log("[WARN] Codex: ~/.codex/AGENTS.md exists without context-mode; left unchanged");
-}
+// ~/.codex/AGENTS.md is assembled by assemble_global_rules (Layer A + Layer B);
+// context-mode routing lives in runtimes/codex/tools.md.
 JSEOF
 }
 
@@ -370,6 +352,35 @@ PYEOF
   done
 }
 
+# Assemble each CLI's global instruction file from:
+#   Layer A — AGENTS.md          (shared, CLI-agnostic coding rules)
+#   Layer B — runtimes/<cli>/tools.md  (CLI-specific tool guidance)
+# Regenerated on every sync; idempotent. No @-include — concatenated so it
+# works regardless of per-CLI include support.
+assemble_global_rules() {
+  local layer_a="$SCRIPT_DIR/AGENTS.md"
+  if [ ! -f "$layer_a" ]; then
+    log_and_print "    [WARN] Layer A missing ($layer_a) — skipping global rule assembly"
+    return
+  fi
+  local cli dir tools target
+  for cli in claude codex gemini; do
+    tools="$SCRIPT_DIR/runtimes/$cli/tools.md"
+    case "$cli" in
+      claude) dir="$CONFIG_DIR"; target="$CONFIG_DIR/CLAUDE.md" ;;
+      codex)  dir="$CODEX_DIR";  target="$CODEX_DIR/AGENTS.md" ;;
+      gemini) dir="$GEMINI_DIR"; target="$GEMINI_DIR/GEMINI.md" ;;
+    esac
+    if [ ! -f "$tools" ]; then
+      log_and_print "    [WARN] $cli Layer B missing ($tools) — skipping"
+      continue
+    fi
+    mkdir -p "$dir"
+    { cat "$layer_a"; printf '\n'; cat "$tools"; } > "$target"
+    log_and_print "    [OK] $target (Layer A + $cli tools)"
+  done
+}
+
 cmd_sync() {
   log "=== cc-bootstrap sync started ==="
   log "  Platform: $(uname -s) $(uname -m)"
@@ -411,8 +422,10 @@ cmd_sync() {
   # Gemini
   echo "[4] Gemini"
   mkdir -p "$GEMINI_DIR"
-  [ -f "$SCRIPT_DIR/runtimes/gemini/GEMINI.md" ] && \
-    make_link "$SCRIPT_DIR/runtimes/gemini/GEMINI.md" "$GEMINI_DIR/GEMINI.md"
+
+  # Global rule files (Layer A + Layer B) — Claude, Codex, Gemini
+  echo "[4b] Global rule assembly"
+  assemble_global_rules
 
   # Shared skills (from registry.yaml)
   echo "[5] Shared skills"
@@ -846,7 +859,6 @@ PYEOF
   if [ -x "$RTK_BIN" ]; then
     run_with_timeout "RTK init Codex" "$RTK_BIN init -g --codex < /dev/null" | tail -1 || true
     run_with_timeout "RTK init Gemini" "$RTK_BIN init -g --gemini --auto-patch < /dev/null" | tail -1 || true
-    ensure_codex_rtk_inline
   fi
   # Graphify — package name is graphifyy; CLI command is graphify.
   export PATH="$HOME/.local/bin:$PATH"
@@ -1064,8 +1076,9 @@ cmd_install() {
   mkdir -p "$CONFIG_DIR/commands" "$CONFIG_DIR/hud" "$CODEX_DIR" "$GEMINI_DIR"
   cp "$SCRIPT_DIR/runtimes/claude/commands/"*.md "$CONFIG_DIR/commands/" 2>/dev/null || true
   cp "$SCRIPT_DIR/runtimes/codex/instructions.md" "$CODEX_DIR/" 2>/dev/null || true
-  cp "$SCRIPT_DIR/runtimes/gemini/GEMINI.md" "$GEMINI_DIR/" 2>/dev/null || true
   cp "$SCRIPT_DIR/ui/statusline/my-statusline.mjs" "$CONFIG_DIR/hud/" 2>/dev/null || true
+  # Global rule files (Layer A + Layer B) for Claude/Codex/Gemini
+  assemble_global_rules
   for rt in claude codex agents gemini; do
     for sd in "$SCRIPT_DIR/skills/"*/; do
       dst_base="$HOME/.$rt/skills"
