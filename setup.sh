@@ -57,6 +57,17 @@ log_and_print() {
   log "$msg"
 }
 
+# Run a command with a wall-clock timeout if `timeout`/`gtimeout` is available,
+# otherwise run without one. macOS has neither by default, so naive
+# `timeout 30 ...` calls would exit 127 every time.
+maybe_timeout() {
+  local secs="$1"; shift
+  if command -v timeout &>/dev/null; then timeout "$secs" "$@"
+  elif command -v gtimeout &>/dev/null; then gtimeout "$secs" "$@"
+  else "$@"
+  fi
+}
+
 # Run command with timeout (if available) and logging
 run_with_timeout() {
   local label="$1"
@@ -534,19 +545,33 @@ PYEOF
     fi
   fi
   # gemini-swarm
+  # Check via filesystem only — never invoke `gemini` here. Both
+  # `gemini --list-extensions` and `gemini extensions install` hang when run
+  # inside this script's stdout pipeline (likely an interactive-UI heuristic);
+  # isolated invocations are fine. Extensions are stored under
+  # ~/.gemini/extensions/<name>, so a directory check is sufficient and never
+  # hangs. Fresh install must be done manually:
+  #   gemini extensions install https://github.com/tmdgusya/gemini-swarm --consent
   if command -v gemini &>/dev/null; then
-    if run_with_timeout "gemini list-extensions" "gemini --list-extensions" 2>/dev/null | grep -q "gemini-swarm"; then
+    if [ -d "$GEMINI_DIR/extensions/gemini-swarm" ]; then
       log_and_print "    [OK] gemini-swarm installed"
     else
-      run_with_timeout "gemini-swarm install" \
-        "gemini extensions install https://github.com/tmdgusya/gemini-swarm --consent" \
-        | tail -1 || true
+      log_and_print "    [INFO] gemini-swarm not installed — run manually:"
+      log_and_print "      gemini extensions install https://github.com/tmdgusya/gemini-swarm --consent"
     fi
   fi
-  # OMC patches
+  # OMC patches — only run if (a) OMC's render.js is present and (b) we're
+  # on Linux. The patch script uses GNU `sed -i '...'` syntax which is not
+  # compatible with BSD sed on macOS (BSD sed requires `sed -i '' '...'`).
   if [ -f "$SCRIPT_DIR/patches/omc/omc-render-model-first.sh" ]; then
-    run_with_timeout "OMC patches" "bash '$SCRIPT_DIR/patches/omc/omc-render-model-first.sh'" \
-      | sed 's/^/    /' || true
+    if ! find "$CONFIG_DIR/plugins/cache/omc/oh-my-claudecode" -name render.js -path '*/hud/*' 2>/dev/null | grep -q .; then
+      log_and_print "    [SKIP] OMC patches — oh-my-claudecode plugin not installed (or cache not yet materialized)"
+    elif [ "$(uname -s)" = "Darwin" ]; then
+      log_and_print "    [SKIP] OMC patches — patch script is GNU-sed only (not macOS-compatible)"
+    else
+      run_with_timeout "OMC patches" "bash '$SCRIPT_DIR/patches/omc/omc-render-model-first.sh'" \
+        | sed 's/^/    /' || true
+    fi
   fi
 
   # [8] Claude Code plugins
@@ -554,7 +579,7 @@ PYEOF
   if command -v claude &>/dev/null; then
     log_and_print "    Fetching plugin list..."
     local plugin_list
-    plugin_list=$(timeout 30 claude plugin list < /dev/null 2>&1) || {
+    plugin_list=$(maybe_timeout 30 claude plugin list < /dev/null 2>&1) || {
       log_and_print "    [WARN] claude plugin list failed (timeout or error), skipping"
       plugin_list=""
     }
@@ -592,7 +617,7 @@ PYEOF
   if command -v claude &>/dev/null; then
     log_and_print "    Fetching MCP list..."
     local mcp_list
-    mcp_list=$(timeout 30 claude mcp list < /dev/null 2>&1) || {
+    mcp_list=$(maybe_timeout 30 claude mcp list < /dev/null 2>&1) || {
       log_and_print "    [WARN] claude mcp list failed (timeout or error), skipping"
       mcp_list=""
     }
@@ -806,70 +831,37 @@ PYEOF
       log_and_print "    [WARN] RTK install failed. See https://github.com/rtk-ai/rtk"
     fi
   fi
-  # RTK hook integrity (independent of binary install).
-  # Two artifacts must exist:
-  #   (a) $CONFIG_DIR/hooks/rtk-rewrite.sh — the shell hook script (created by `rtk init -g`,
-  #       header: `# rtk-hook-version: 2`, delegates to `rtk rewrite` Rust binary).
-  #   (b) settings.json PreToolUse[matcher=Bash] entry whose command is the (a) path.
-  # Past mistake (fixed here): previous versions injected `"command": "rtk hook claude"` as the
-  # entry, but that subcommand does NOT exist in rtk ≥ 0.30 (only `rtk hook gemini`/`copilot`).
-  # It silently failed with exit 127 on every Bash call. The correct command is the (a) path.
-  # `rtk init -g --auto-patch` is best-effort but unreliable in 0.31.0 — we always finish the
-  # wiring via direct JSON merge, idempotent + legacy-entry-stripping.
+  # RTK hook integrity.
+  # rtk >= 0.38 registers the hook by writing
+  #   PreToolUse[Bash] -> { "command": "rtk hook claude" }
+  # directly into settings.json via `rtk init -g`. There is no longer a
+  # separate `rtk-rewrite.sh` shell script. (Older setup.sh wired a custom
+  # script path; that whole branch is obsolete in rtk 0.38+.)
   if command -v rtk &>/dev/null; then
-    if [ ! -f "$CONFIG_DIR/hooks/rtk-rewrite.sh" ]; then
-      log_and_print "    rtk-rewrite.sh missing — running 'rtk init -g'..."
-      run_with_timeout "RTK init -g" "rtk init -g --auto-patch < /dev/null" | tail -3 || true
-    fi
-    if [ -f "$CONFIG_DIR/hooks/rtk-rewrite.sh" ] && command -v python3 &>/dev/null; then
-      python3 - "$CONFIG_DIR/settings.json" "$CONFIG_DIR/hooks/rtk-rewrite.sh" << 'PYEOF' | sed 's/^/    /'
+    run_with_timeout "RTK init -g" "rtk init -g --auto-patch < /dev/null" | tail -3 || true
+    if command -v python3 &>/dev/null; then
+      python3 - "$CONFIG_DIR/settings.json" << 'PYEOF' | sed 's/^/    /'
 import json, sys
 from pathlib import Path
-p, hook_path = Path(sys.argv[1]), sys.argv[2]
-data = {}
-if p.exists():
-    try:
-        data = json.loads(p.read_text())
-    except Exception as e:
-        print(f"[WARN] settings.json unparseable ({e}) — aborting merge")
-        sys.exit(0)
-hooks = data.setdefault("hooks", {})
-pre = hooks.setdefault("PreToolUse", [])
-# Strip legacy `rtk hook claude` entries (subcommand never existed; injected by older setup.sh).
-before = len(pre)
-pre[:] = [
-    e for e in pre
-    if not (
-        isinstance(e, dict) and e.get("matcher") == "Bash" and any(
-            isinstance(h, dict) and h.get("command") == "rtk hook claude"
-            for h in e.get("hooks", [])
-        )
-    )
-]
-removed = before - len(pre)
-already = any(
+p = Path(sys.argv[1])
+if not p.exists():
+    print("[WARN] settings.json missing — RTK hook check skipped")
+    sys.exit(0)
+try:
+    data = json.loads(p.read_text())
+except Exception as e:
+    print(f"[WARN] settings.json unparseable ({e})")
+    sys.exit(0)
+pre = data.get("hooks", {}).get("PreToolUse", [])
+wired = any(
     isinstance(e, dict) and e.get("matcher") == "Bash" and any(
-        isinstance(h, dict) and h.get("command") == hook_path
+        isinstance(h, dict) and h.get("command", "").startswith("rtk hook claude")
         for h in e.get("hooks", [])
     ) for e in pre
 )
-if not already:
-    pre.append({"matcher": "Bash", "hooks": [{"type": "command", "command": hook_path}]})
-if (not already) or removed:
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(data, indent=2))
-msg = "[OK] RTK hook already wired" if already and not removed else f"[OK] RTK hook wired -> {hook_path}"
-if removed:
-    msg += f" (stripped {removed} legacy 'rtk hook claude' entr{'y' if removed==1 else 'ies'})"
-print(msg)
+print("[OK] RTK hook wired (rtk hook claude)" if wired
+      else "[WARN] RTK hook not in settings.json — run `rtk init -g` manually")
 PYEOF
-      if grep -q 'rtk-rewrite.sh' "$CONFIG_DIR/settings.json" 2>/dev/null; then
-        log_and_print "    [OK] RTK hook installed (token rewrite active)"
-      else
-        log_and_print "    [WARN] RTK hook still missing — manual patch required (see $LOG_FILE)"
-      fi
-    else
-      log_and_print "    [WARN] rtk-rewrite.sh hook file missing or python3 unavailable — skipping wire"
     fi
   fi
   # RTK for Codex + Gemini (Claude RTK hook wired above)
