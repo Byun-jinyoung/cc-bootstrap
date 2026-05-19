@@ -646,22 +646,82 @@ PYEOF
     }
     [ -n "$mcp_list" ] && log_and_print "    MCP list retrieved."
 
+    # Auto-migrate a local-scope MCP entry at the current cwd to user scope.
+    # Uses JSON-level access (claude mcp add-json + ~/.claude.json identity
+    # check) rather than text scraping + eval — that earlier approach was
+    # unsafe (shell injection, args-with-spaces loss, multiline env loss).
+    # Aborts on conflict (user already has different payload) and preserves
+    # the local entry on any failure.
+    migrate_mcp_local_to_user() {
+      local name="$1"
+      python3 - "$name" "$HOME/.claude.json" "$PWD" << 'PYEOF'
+import json, sys, subprocess, os
+name, path, cwd = sys.argv[1], sys.argv[2], sys.argv[3]
+
+def warn(msg):
+    print(f"    [{name}] [WARN] {msg}")
+
+try:
+    data = json.load(open(path))
+except (OSError, json.JSONDecodeError) as e:
+    warn(f"~/.claude.json unreadable ({e}) — skipping migration")
+    sys.exit(1)
+
+projects = data.get('projects') or {}
+# Path-key candidates: claude may key projects by raw cwd, realpath, or normpath
+candidates = {cwd, os.path.realpath(cwd), os.path.normpath(cwd)}
+matches = [k for k in candidates if name in ((projects.get(k) or {}).get('mcpServers') or {})]
+if not matches:
+    sys.exit(0)
+if len(set(matches)) > 1:
+    warn(f"ambiguous project key match ({matches}) — manual review needed")
+    sys.exit(1)
+local_entry = projects[matches[0]]['mcpServers'][name]
+
+user_entry = (data.get('mcpServers') or {}).get(name)
+if user_entry is not None and user_entry != local_entry:
+    warn("user-scope entry differs from local — local preserved (manual review needed)")
+    sys.exit(1)
+
+if user_entry is None:
+    proc = subprocess.run(
+        ['claude', 'mcp', 'add-json', '--scope', 'user', name, json.dumps(local_entry)],
+        capture_output=True, text=True
+    )
+    if proc.returncode != 0:
+        warn(f"add-json failed (rc={proc.returncode}): {(proc.stderr or '').strip()[:200]}")
+        sys.exit(1)
+    try:
+        data2 = json.load(open(path))
+    except (OSError, json.JSONDecodeError) as e:
+        warn(f"~/.claude.json reread failed ({e}) — local preserved")
+        sys.exit(1)
+    if (data2.get('mcpServers') or {}).get(name) != local_entry:
+        warn("user-scope copy not equal to local after add — local preserved")
+        sys.exit(1)
+
+rm = subprocess.run(
+    ['claude', 'mcp', 'remove', name, '-s', 'local'],
+    capture_output=True, text=True
+)
+if rm.returncode != 0:
+    warn(f"local remove failed: {(rm.stderr or '').strip()[:200]} — duplicate state, manual cleanup needed")
+    sys.exit(1)
+
+print(f"    [{name}] [OK] migrated local -> user scope")
+PYEOF
+    }
+
     add_mcp() {
       local name="$1" cmd="$2" binary="$3"
       log_and_print "    [$name] checking..."
       if echo "$mcp_list" | grep -q "$name"; then
         log_and_print "    [$name] OK — already registered"
-        # Detect local-scope shadow: setup.sh registers at -s user, but earlier
-        # versions defaulted to local. If a local-scope entry exists, OAuth /
-        # env auth diverges per scope and silently breaks one of them. Flag
-        # for the user to clean up — env vars may need preserving, so we
-        # don't auto-remove.
+        # Detect local-scope shadow and auto-migrate. Earlier setup.sh defaulted
+        # to local scope; this preserves env/headers/args via JSON identity.
         if maybe_timeout 10 claude mcp get "$name" </dev/null 2>/dev/null \
              | grep -q 'Scope: Local'; then
-          log_and_print "    [$name] [WARN] registered at LOCAL scope (private to cwd)."
-          log_and_print "             To migrate to user scope (recommended):"
-          log_and_print "               claude mcp remove $name -s local"
-          log_and_print "               # then re-run ./setup.sh sync"
+          migrate_mcp_local_to_user "$name"
         fi
       elif [ -n "$binary" ] && ! command -v "$binary" &>/dev/null; then
         log_and_print "    [$name] SKIP — $binary binary not found"
