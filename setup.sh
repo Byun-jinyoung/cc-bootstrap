@@ -1079,7 +1079,8 @@ PYEOF
 
   echo ""
   echo "[ Managed skills ]"
-  for sk in triangle-review codebase-scan graphify; do
+  # graphify is checked separately below (CLI-owned, not a cc-bootstrap symlink).
+  for sk in triangle-review codebase-scan; do
     src="$SCRIPT_DIR/skills/$sk"
     dst="$CONFIG_DIR/skills/$sk"
     if [ -L "$dst" ] && [ -e "$dst" ]; then echo "  [OK] $sk symlink"
