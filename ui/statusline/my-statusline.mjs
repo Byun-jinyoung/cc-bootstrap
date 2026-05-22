@@ -80,6 +80,18 @@ const MY_HUD_CONFIG = {
     autoCompact: false,
   },
   wrapMode: "truncate",
+  layout: {
+    // Top line: model + branch (joined by " | ")
+    line1: ["model", "gitBranch"],
+    // Main line: OMC label + metrics + state (model removed — moved to line1)
+    main: [
+      "omcLabel", "rateLimits", "customBuckets", "permission", "thinking",
+      "promptTime", "session", "tokens", "ralph", "autopilot", "prd",
+      "skills", "lastSkill", "contextBar", "agents", "background",
+      "callCounts", "lastTool", "sessionSummary",
+    ],
+    detail: ["missionBoard", "agents", "contextWarning", "todos"],
+  },
 };
 
 /**
