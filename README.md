@@ -14,7 +14,7 @@ bash setup.sh
 
 | Component | Description |
 |---|---|
-| **codex-gemini-mcp** (fork) | MCP server with session resume + gemini `-y` flag |
+| **codex-gemini-mcp** (fork) | MCP servers `codex-mcp` + `antigravity-mcp` with multi-turn `session_id` resume (Gemini provider removed 2026-06-18) |
 | **my-statusline.mjs** | Custom HUD: model, branch, 5h/7d usage bars, context, agents, todos |
 | **gemini-swarm** | Gemini CLI extension for multi-agent parallel execution |
 | **gemini-swarm.md** | Claude Code skill for invoking gemini-swarm |
@@ -71,6 +71,6 @@ bash patches/omc-render-model-first.sh
 
 ## Related Repos
 
-- [codex-gemini-mcp (fork)](https://github.com/Byun-jinyoung/codex-gemini-mcp) — session resume + gemini -y
+- [codex-gemini-mcp (fork)](https://github.com/Byun-jinyoung/codex-gemini-mcp) — `codex-mcp` + `antigravity-mcp` with session resume + multi-turn
 - [gemini-swarm](https://github.com/tmdgusya/gemini-swarm) — multi-agent orchestration
 - [oh-my-claudecode](https://github.com/Yeachan-Heo/oh-my-claudecode) — workflow orchestration plugin

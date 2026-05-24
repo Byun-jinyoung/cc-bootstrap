@@ -5,6 +5,8 @@ description: Use when the user requests multi-agent parallel research, analysis,
 
 # Gemini Swarm
 
+> ⚠️ **DEPRECATED 2026-06-18** — This command depends on Gemini CLI and the `gemini-swarm` extension. Gemini CLI support ends 2026-06-18; once `gemini` is uninstalled, this command will not work. No direct Antigravity equivalent yet (agy's plugin / multi-agent story is different). For multi-AI orchestration on Antigravity, use `/triangle-review`, `/debate-loop`, or `/oh-my-claudecode:ccg`. Kept for reference until full replacement lands.
+
 Multi-agent parallel execution via Gemini CLI + gemini-swarm extension.
 
 ## Execution Modes

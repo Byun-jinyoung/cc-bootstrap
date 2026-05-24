@@ -114,28 +114,29 @@ make_link() {
   log_and_print "    [LINK] $(basename "$dst") → $src"
 }
 
-# Verify codex-mcp / gemini-mcp install integrity.
+# Verify codex-mcp / antigravity-mcp install integrity.
 # Past failure modes this guards against:
 #   1. JS entry files missing +x bit  → "Permission denied" on spawn  → auto-fixed via chmod
 #   2. Original donghae0414 upstream installed instead of Byun-jinyoung fork
-#      → missing session_id resume + gemini -y flag  → detected via dist feature grep
+#      → missing session_id resume + antigravity provider  → detected via dist feature grep
 #   3. Dangling /usr/bin symlink (target deleted/renamed)  → readlink -f resolves nothing
+#   4. Pre-2026-06-18 fork still ships gemini-mcp bin  → forces reinstall
 # Returns 0 on healthy install, 1 if reinstall needed.
 # Side effects: chmod +x on entry files (auto-repair, idempotent).
 verify_codex_gemini_mcp() {
   local bin entry dist_dir
-  for bin in codex-mcp gemini-mcp; do
+  for bin in codex-mcp antigravity-mcp; do
     command -v "$bin" &>/dev/null || return 1
     entry="$(readlink -f "$(command -v "$bin")")"
     [ -f "$entry" ] || return 1
     [ -x "$entry" ] || chmod +x "$entry" 2>/dev/null || return 1
   done
-  # entry path: <dist>/mcp/{codex,gemini}-stdio-entry.js
+  # entry path: <dist>/mcp/{codex,antigravity}-stdio-entry.js
   entry="$(readlink -f "$(command -v codex-mcp)")"
   dist_dir="$(dirname "$(dirname "$entry")")"
-  # Fork-only features (Byun-jinyoung): session_id resume, gemini -y
+  # Fork-only features (Byun-jinyoung): session_id resume + antigravity provider
   grep -q 'session_id' "$dist_dir/providers/codex.js" 2>/dev/null || return 1
-  grep -q '"-y"' "$dist_dir/providers/gemini.js" 2>/dev/null || return 1
+  grep -q '"--conversation"' "$dist_dir/providers/antigravity.js" 2>/dev/null || return 1
   return 0
 }
 
@@ -548,11 +549,13 @@ PYEOF
       log_and_print "           Run: echo 'export PATH=\"\$(npm config get prefix)/bin:\$PATH\"' >> ~/.bashrc"
     fi
   fi
-  # codex-gemini-mcp (Byun-jinyoung fork — required for session_id resume + gemini -y)
+  # codex-gemini-mcp (Byun-jinyoung fork — provides codex-mcp + antigravity-mcp
+  # with session_id resume and antigravity multi-turn; replaces former gemini-mcp
+  # since gemini CLI is deprecated 2026-06-18).
   # Integrity check covers: binary present, exec bit set, fork features in dist.
   # Auto-repairs missing exec bit; reinstalls if fork features absent.
   if verify_codex_gemini_mcp; then
-    log_and_print "    [OK] codex-mcp + gemini-mcp (fork integrity verified)"
+    log_and_print "    [OK] codex-mcp + antigravity-mcp (fork integrity verified)"
   else
     log_and_print "    Installing/repairing codex-gemini-mcp fork..."
     run_with_timeout "codex-gemini-mcp install" \
@@ -739,7 +742,7 @@ PYEOF
     # All MCPs registered at -s user (Claude default is local — was creating
     # cwd-bound entries that silently shadowed any user-level OAuth/auth state).
     add_mcp "codex-mcp" "claude mcp add -s user codex-mcp -- codex-mcp" "codex-mcp"
-    add_mcp "gemini-mcp" "claude mcp add -s user gemini-mcp -e MCP_GEMINI_DEFAULT_MODEL=gemini-3.1-pro-preview -- gemini-mcp" "gemini-mcp"
+    add_mcp "antigravity-mcp" "claude mcp add -s user antigravity-mcp -- antigravity-mcp" "antigravity-mcp"
     add_mcp "serena" "claude mcp add -s user serena -- uvx --from 'git+https://github.com/oraios/serena' serena start-mcp-server" ""
     add_mcp "supermemory" "claude mcp add -s user --transport http supermemory https://mcp.supermemory.ai/mcp" ""
   fi
@@ -1100,7 +1103,7 @@ cmd_doctor() {
   echo ""
   echo "[ MCP servers (Claude) ]"
   if command -v claude &>/dev/null; then
-    for m in codex-mcp gemini-mcp serena supermemory; do
+    for m in codex-mcp antigravity-mcp serena supermemory; do
       if claude mcp list 2>/dev/null | grep -qE "$m.*(Connected|Needs authentication)"; then echo "  [OK] $m"
       else echo "  [MISS] $m"; WARNINGS=$((WARNINGS+1)); fi
     done
@@ -1110,13 +1113,13 @@ cmd_doctor() {
   echo "[ codex-gemini-mcp integrity ]"
   if verify_codex_gemini_mcp; then
     entry_path="$(readlink -f "$(command -v codex-mcp 2>/dev/null)" 2>/dev/null)"
-    echo "  [OK] fork features present (session_id, gemini -y)"
+    echo "  [OK] fork features present (codex session_id, antigravity --conversation)"
     echo "        resolved: ${entry_path:-?}"
   else
     echo "  [FAIL] codex-gemini-mcp integrity — run 'setup.sh sync' to repair"
     WARNINGS=$((WARNINGS+1))
   fi
-  for bin in codex-mcp gemini-mcp; do
+  for bin in codex-mcp antigravity-mcp; do
     if mcp_spawn_check "$bin"; then
       echo "  [OK] $bin stdio handshake"
     else
