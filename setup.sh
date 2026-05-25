@@ -104,6 +104,68 @@ run_with_timeout() {
   fi
 }
 
+# Decide a user-owned npm global prefix and export it for all subsequent
+# `npm install -g` calls (and child processes like the fork install.sh).
+#
+# Policy goal (multi-user server isolation):
+#   This machine may be a shared host where MY tools and credentials must
+#   not be visible/executable to OTHER users on the box. Anything written
+#   under /usr/local, /opt, or /usr is by default readable+executable by
+#   everyone (mode 0755 on macOS Homebrew; system paths on Linux servers).
+#   So we keep everything under $HOME with a mode that excludes group+other.
+#
+# What this protects:
+#   - codex-mcp / antigravity-mcp binaries + their node_modules tree
+#     (provider configs, hardcoded model defaults, anything the package
+#     ships).
+#   - @openai/codex CLI binary tree.
+#   - Indirectly: any future package that this script installs globally.
+#
+# Out of scope (NOT protected by this function — handled elsewhere/by user):
+#   - Credential dirs: ~/.codex, ~/.gemini, ~/.claude. These are user-owned
+#     state not created by this script; doctor() WARNs if they are readable
+#     by other users, but never chmods them automatically (that would
+#     overstep — those dirs may have user-chosen sharing).
+#
+# Decision rule for prefix location:
+#   - If `npm config get prefix` is already under $HOME (covers nvm, volta,
+#     asdf, or a previously-configured ~/.npm-global), respect it.
+#   - Otherwise pick $HOME/.npm-global (the npm-documented per-user default).
+#
+# Side effects:
+#   - mkdir -p <prefix>/{bin,lib} (idempotent).
+#   - chmod 700 on the prefix root + bin + lib so other users on a shared
+#     host cannot list, read, or exec what we install. macOS default umask
+#     0022 would leave them 0755 (world-readable+exec) otherwise.
+#   - Exports USER_NPM_PREFIX (used by callers to build env strings).
+#   - Exports NPM_USER_ENV: a literal "VAR=VAL VAR=VAL" prefix safe to prepend
+#     to any `bash -c "..."` payload (run_with_timeout uses bash -c).
+#   - Does NOT modify ~/.npmrc — we keep the user's global npm config alone
+#     and instead pass the prefix via env per-invocation.
+ensure_user_npm_prefix() {
+  local cur=""
+  if command -v npm &>/dev/null; then
+    cur="$(npm config get prefix 2>/dev/null)"
+  fi
+  case "$cur" in
+    "$HOME"/*) USER_NPM_PREFIX="$cur" ;;
+    *)         USER_NPM_PREFIX="$HOME/.npm-global" ;;
+  esac
+  mkdir -p "$USER_NPM_PREFIX/bin" "$USER_NPM_PREFIX/lib" 2>/dev/null || true
+  # Lock owner-only so other users on a shared server can't `ls`, read, or
+  # exec what's inside. Idempotent. Only applied if we own the dir (skip if
+  # somehow another uid created it — let user inspect).
+  if [ -w "$USER_NPM_PREFIX" ] && [ "$(stat -f '%u' "$USER_NPM_PREFIX" 2>/dev/null || stat -c '%u' "$USER_NPM_PREFIX" 2>/dev/null)" = "$(id -u)" ]; then
+    chmod 700 "$USER_NPM_PREFIX" "$USER_NPM_PREFIX/bin" "$USER_NPM_PREFIX/lib" 2>/dev/null || true
+  fi
+  # Env string prepended to npm invocations. npm_config_prefix is the official
+  # npm env override (docs.npmjs.com/cli/v10/using-npm/config). Quoting the
+  # value handles paths with spaces; the assignment must be bash-c safe.
+  NPM_USER_ENV="npm_config_prefix='$USER_NPM_PREFIX'"
+  export USER_NPM_PREFIX NPM_USER_ENV
+  log "  USER_NPM_PREFIX=$USER_NPM_PREFIX (npm reported: ${cur:-<unset>}, mode locked to 0700)"
+}
+
 make_link() {
   local src="$1" dst="$2"
   if [ -L "$dst" ]; then rm "$dst"
@@ -114,14 +176,17 @@ make_link() {
   log_and_print "    [LINK] $(basename "$dst") → $src"
 }
 
-# Verify codex-mcp / antigravity-mcp install integrity.
-# Past failure modes this guards against:
-#   1. JS entry files missing +x bit  → "Permission denied" on spawn  → auto-fixed via chmod
-#   2. Original donghae0414 upstream installed instead of Byun-jinyoung fork
-#      → missing session_id resume + antigravity provider  → detected via dist feature grep
-#   3. Dangling /usr/bin symlink (target deleted/renamed)  → readlink -f resolves nothing
-#   4. Pre-2026-06-18 fork still ships gemini-mcp bin  → forces reinstall
-# Returns 0 on healthy install, 1 if reinstall needed.
+# Verify Byun-jinyoung fork of codex-gemini-mcp is installed (not upstream).
+# Fork distinguishing facts (vs donghae0414 upstream):
+#   - bin: codex-mcp + antigravity-mcp  (upstream: codex-mcp + gemini-mcp)
+#   - dist/providers/antigravity.js exists with antigravity-specific flags
+#   - dist/providers/codex.js retains session_id resume support
+# Past failure modes guarded against:
+#   1. JS entry files missing +x bit → "Permission denied" → auto-fixed via chmod
+#   2. Upstream donghae0414 installed in place of fork → detected via feature grep
+#   3. Dangling /usr/bin symlink (target deleted/renamed) → readlink -f resolves nothing
+#   4. Pre-2026-06-18 fork still ships gemini-mcp bin → forces reinstall by missing antigravity-mcp
+# Returns 0 on healthy fork install, 1 if reinstall needed.
 # Side effects: chmod +x on entry files (auto-repair, idempotent).
 verify_codex_gemini_mcp() {
   local bin entry dist_dir
@@ -134,9 +199,69 @@ verify_codex_gemini_mcp() {
   # entry path: <dist>/mcp/{codex,antigravity}-stdio-entry.js
   entry="$(readlink -f "$(command -v codex-mcp)")"
   dist_dir="$(dirname "$(dirname "$entry")")"
-  # Fork-only features (Byun-jinyoung): session_id resume + antigravity provider
+  # Fork-only features (Byun-jinyoung): session_id resume + antigravity provider.
+  # Feature-grep is more robust than file-existence because upstream could
+  # rename files; the actual invocation signature (session_id, --conversation)
+  # is what makes the fork behave correctly.
   grep -q 'session_id' "$dist_dir/providers/codex.js" 2>/dev/null || return 1
   grep -q '"--conversation"' "$dist_dir/providers/antigravity.js" 2>/dev/null || return 1
+  return 0
+}
+
+# Detect & remove upstream donghae0414 install (and stale system-wide symlinks)
+# so the fork install can land cleanly. Idempotent: only acts when upstream
+# markers are present. Never touches the fork's own install.
+# Side effects: npm uninstall -g per detected prefix; warns about root-owned
+# system paths (/usr/bin, /usr/lib/node_modules) that require sudo.
+cleanup_upstream_codex_gemini_mcp() {
+  local removed=0 prefix pkg_dir warn_sys=0
+  # 1. npm-prefix-managed installs (no sudo needed for user-prefix; system
+  #    prefix may require sudo — npm itself surfaces the error).
+  local prefixes=()
+  local p
+  # USER_NPM_PREFIX first — that's where this script writes. Always scan it
+  # even if `npm config get prefix` reports something else.
+  for p in "$USER_NPM_PREFIX" "$(npm config get prefix 2>/dev/null)" "/usr/local" "/opt/homebrew" "$HOME/.npm-global"; do
+    [ -n "$p" ] || continue
+    # de-dup
+    local _dup=0 _q
+    for _q in "${prefixes[@]}"; do [ "$_q" = "$p" ] && _dup=1 && break; done
+    [ "$_dup" = "0" ] && prefixes+=("$p")
+  done
+  for prefix in "${prefixes[@]}"; do
+    pkg_dir="$prefix/lib/node_modules/@donghae0414/codex-gemini-mcp"
+    if [ -d "$pkg_dir" ]; then
+      # Confirm it's upstream (has providers/gemini.js); never delete the fork
+      if [ -f "$pkg_dir/dist/providers/gemini.js" ] && [ ! -f "$pkg_dir/dist/providers/antigravity.js" ]; then
+        log_and_print "    [cleanup] uninstalling upstream @donghae0414/codex-gemini-mcp from $prefix"
+        run_with_timeout "npm uninstall upstream ($prefix)" \
+          "npm uninstall -g --prefix '$prefix' @donghae0414/codex-gemini-mcp" \
+          | tail -2 || true
+        removed=1
+      fi
+    fi
+  done
+  # 2. Root-owned system-wide leftovers (legacy: /usr/lib/node_modules + /usr/bin).
+  #    These are NOT under user npm prefix and require sudo to remove.
+  if [ -d "/usr/lib/node_modules/@donghae0414/codex-gemini-mcp" ]; then
+    warn_sys=1
+    log_and_print "    [cleanup] [SUDO NEEDED] /usr/lib/node_modules/@donghae0414/codex-gemini-mcp present"
+    log_and_print "      Remove manually: sudo rm -rf /usr/lib/node_modules/@donghae0414"
+  fi
+  for sym in /usr/bin/codex-mcp /usr/bin/gemini-mcp /usr/bin/antigravity-mcp; do
+    if [ -L "$sym" ]; then
+      local tgt
+      tgt="$(readlink -f "$sym" 2>/dev/null)"
+      # Stale (target gone) OR pointing into /usr/lib/node_modules (legacy system install)
+      if [ ! -e "$tgt" ] || [[ "$tgt" == /usr/lib/node_modules/* ]]; then
+        warn_sys=1
+        log_and_print "    [cleanup] [SUDO NEEDED] stale symlink $sym → ${tgt:-<dangling>}"
+        log_and_print "      Remove manually: sudo rm $sym"
+      fi
+    fi
+  done
+  [ "$warn_sys" = "1" ] && \
+    log_and_print "    [cleanup] system-wide leftovers must be removed before fork can win on PATH"
   return 0
 }
 
@@ -408,16 +533,32 @@ cmd_sync() {
   done
   [ $ERRORS -gt 0 ] && echo "FATAL: missing deps" && exit 1
 
-  # Ensure user's npm global bin is on PATH for this sync run, so later checks
+  # Force every npm global install in this sync into a $HOME-rooted prefix
+  # locked to mode 0700, so on a shared/multi-user server MY tools (codex-mcp,
+  # @openai/codex, antigravity-mcp, etc.) are not readable or executable by
+  # other users on the box. Anything under /usr/local|/opt|/usr would be 0755
+  # by default (world-readable+exec). Sets USER_NPM_PREFIX + NPM_USER_ENV.
+  ensure_user_npm_prefix
+
+  # Ensure the user prefix bin is on PATH for this sync run, so later checks
   # like `command -v context-mode` succeed even on shells that haven't added
-  # it themselves. Users on a per-user npm prefix (e.g. ~/.npm-global) should
-  # still add it to their shell rc — see post-sync instructions.
+  # it themselves. Users still need to add it to their shell rc — see
+  # post-sync instructions.
+  if [ -d "$USER_NPM_PREFIX/bin" ] && [[ ":$PATH:" != *":$USER_NPM_PREFIX/bin:"* ]]; then
+    export PATH="$USER_NPM_PREFIX/bin:$PATH"
+    log "  Added user npm prefix bin to PATH: $USER_NPM_PREFIX/bin"
+  fi
+  # Also keep the currently-configured npm prefix bin reachable (only matters
+  # if it differs from USER_NPM_PREFIX, e.g. user has a system prefix but we're
+  # redirecting writes to ~/.npm-global). Reading old installs is harmless;
+  # we never WRITE to it.
   if command -v npm &>/dev/null; then
-    local npm_bin
-    npm_bin="$(npm config get prefix 2>/dev/null)/bin"
-    if [ -d "$npm_bin" ] && [[ ":$PATH:" != *":$npm_bin:"* ]]; then
-      export PATH="$npm_bin:$PATH"
-      log "  Added npm global bin to PATH: $npm_bin"
+    local _cur_npm_bin
+    _cur_npm_bin="$(npm config get prefix 2>/dev/null)/bin"
+    if [ -n "$_cur_npm_bin" ] && [ "$_cur_npm_bin" != "$USER_NPM_PREFIX/bin" ] \
+       && [ -d "$_cur_npm_bin" ] && [[ ":$PATH:" != *":$_cur_npm_bin:"* ]]; then
+      export PATH="$PATH:$_cur_npm_bin"
+      log "  Appended legacy npm prefix bin to PATH (read-only): $_cur_npm_bin"
     fi
   fi
 
@@ -538,8 +679,8 @@ PYEOF
   if command -v context-mode &>/dev/null; then
     log_and_print "    [OK] context-mode installed"
   else
-    log_and_print "    Installing context-mode (npm global)..."
-    run_with_timeout "context-mode install" "npm install -g context-mode < /dev/null" \
+    log_and_print "    Installing context-mode (npm global → $USER_NPM_PREFIX)..."
+    run_with_timeout "context-mode install" "$NPM_USER_ENV npm install -g context-mode < /dev/null" \
       | tail -3 || true
     # Verify post-install (install may succeed but bin dir may not be on PATH).
     if command -v context-mode &>/dev/null; then
@@ -549,22 +690,99 @@ PYEOF
       log_and_print "           Run: echo 'export PATH=\"\$(npm config get prefix)/bin:\$PATH\"' >> ~/.bashrc"
     fi
   fi
-  # codex-gemini-mcp (Byun-jinyoung fork — provides codex-mcp + antigravity-mcp
-  # with session_id resume and antigravity multi-turn; replaces former gemini-mcp
-  # since gemini CLI is deprecated 2026-06-18).
-  # Integrity check covers: binary present, exec bit set, fork features in dist.
-  # Auto-repairs missing exec bit; reinstalls if fork features absent.
-  if verify_codex_gemini_mcp; then
-    log_and_print "    [OK] codex-mcp + antigravity-mcp (fork integrity verified)"
+  # @openai/codex CLI — REQUIRED by codex-mcp (the MCP spawns `codex` from PATH).
+  # Without this, codex-mcp connects but every request fails on first spawn.
+  #
+  # DETERMINISTIC install policy (avoids "different machine, different path"):
+  #   1. SCAN all known bin locations for existing `codex` binaries.
+  #   2. If MULTIPLE installs exist → list them, identify PATH winner, WARN
+  #      (do not auto-install; let user resolve to one canonical location).
+  #   3. If EXACTLY ONE exists → record path, skip install.
+  #   4. If NONE → install via `npm install -g @openai/codex`, then re-scan.
+  local _codex_cands=()
+  local _seg _npm_prefix
+  _npm_prefix="$(npm config get prefix 2>/dev/null)"
+  # User prefix first — that's where we install into. Then the currently-
+  # configured npm prefix (read-only on shared systems), then standard paths.
+  for _seg in "$USER_NPM_PREFIX/bin" \
+              "${_npm_prefix:+${_npm_prefix}/bin}" \
+              "$HOME/.npm-global/bin" \
+              /usr/local/bin /opt/homebrew/bin /usr/bin; do
+    [ -n "$_seg" ] || continue
+    if [ -x "$_seg/codex" ]; then
+      # Resolve symlinks; de-dup by resolved path so symlinks that all point
+      # to the same target don't get counted as separate installs.
+      local _resolved
+      _resolved="$(readlink -f "$_seg/codex" 2>/dev/null || echo "$_seg/codex")"
+      local _dup=0 _existing
+      for _existing in "${_codex_cands[@]}"; do
+        [ "$(readlink -f "$_existing" 2>/dev/null || echo "$_existing")" = "$_resolved" ] && _dup=1 && break
+      done
+      [ "$_dup" = "1" ] || _codex_cands+=("$_seg/codex")
+    fi
+  done
+
+  if [ "${#_codex_cands[@]}" -gt 1 ]; then
+    log_and_print "    [codex] [WARN] multiple codex installs detected — non-deterministic across machines:"
+    for _seg in "${_codex_cands[@]}"; do
+      log_and_print "             • $_seg  →  $(readlink -f "$_seg" 2>/dev/null || echo "$_seg")"
+    done
+    if command -v codex &>/dev/null; then
+      log_and_print "             PATH winner: $(command -v codex)"
+    fi
+    log_and_print "             Keep ONE (recommended: $USER_NPM_PREFIX/bin/codex)."
+    log_and_print "             Remove others with: npm uninstall -g @openai/codex (per prefix) or 'sudo rm <path>' for legacy /usr/bin."
+  elif [ "${#_codex_cands[@]}" -eq 1 ]; then
+    log_and_print "    [OK] codex CLI present -> ${_codex_cands[0]}"
   else
-    log_and_print "    Installing/repairing codex-gemini-mcp fork..."
+    log_and_print "    Installing @openai/codex to user prefix ($USER_NPM_PREFIX)..."
+    run_with_timeout "@openai/codex install" "$NPM_USER_ENV npm install -g @openai/codex < /dev/null" \
+      | tail -3 || true
+    # Re-scan after install. USER_NPM_PREFIX is where we forced the write.
+    local _after=""
+    if [ -x "$USER_NPM_PREFIX/bin/codex" ]; then
+      _after="$USER_NPM_PREFIX/bin/codex"
+    elif command -v codex &>/dev/null; then
+      _after="$(command -v codex)"
+    fi
+    if [ -n "$_after" ]; then
+      log_and_print "    [OK] @openai/codex installed -> $_after"
+      if [ "$_after" = "$USER_NPM_PREFIX/bin/codex" ] && ! command -v codex &>/dev/null; then
+        log_and_print "         (note: $USER_NPM_PREFIX/bin not on live PATH; codex-mcp PATH injection below handles it)"
+      fi
+    else
+      log_and_print "    [WARN] @openai/codex install failed — codex-mcp will not function. See $LOG_FILE"
+    fi
+  fi
+
+  # codex-gemini-mcp (Byun-jinyoung fork — codex-mcp + antigravity-mcp)
+  # The fork shares the npm package name @donghae0414/codex-gemini-mcp with
+  # upstream donghae0414, so upstream installs win on PATH unless explicitly
+  # uninstalled first. We always run cleanup before (re)install to guarantee
+  # the fork is what ends up on disk.
+  if verify_codex_gemini_mcp; then
+    log_and_print "    [OK] codex-mcp + antigravity-mcp (Byun-jinyoung fork verified)"
+  else
+    log_and_print "    Cleaning up upstream donghae0414 install (if any)..."
+    cleanup_upstream_codex_gemini_mcp
+    log_and_print "    Installing/repairing Byun-jinyoung fork (target: $USER_NPM_PREFIX)..."
+    # Pass npm_config_prefix into the piped bash so the fork's install.sh
+    # (which calls `npm install -g ./<tarball>`) writes into USER_NPM_PREFIX
+    # on its FIRST attempt — that skips its sudo-fallback branch entirely
+    # and keeps the package inside MY $HOME (mode 0700 via ensure_user_npm_prefix)
+    # instead of /usr/local|/opt|/usr where other users on a shared host could
+    # read provider configs, model defaults, or any embedded data.
+    # `npm prefix -g` inside install.sh also reads this env var, so its
+    # post-install path resolution lines up with the actual install location.
     run_with_timeout "codex-gemini-mcp install" \
-      "curl -sL https://raw.githubusercontent.com/Byun-jinyoung/codex-gemini-mcp/main/install.sh | bash" \
+      "$NPM_USER_ENV curl -sL https://raw.githubusercontent.com/Byun-jinyoung/codex-gemini-mcp/main/install.sh | $NPM_USER_ENV bash" \
       | tail -3 || true
     if verify_codex_gemini_mcp; then
-      log_and_print "    [OK] codex-gemini-mcp fork installed and verified"
+      log_and_print "    [OK] Byun-jinyoung fork installed and verified"
     else
-      log_and_print "    [WARN] codex-gemini-mcp install ran but integrity still failing — see $LOG_FILE"
+      log_and_print "    [WARN] fork install ran but integrity still failing — see $LOG_FILE"
+      log_and_print "           Most likely cause: system-wide /usr/bin/{codex,gemini}-mcp symlinks shadowing fork on PATH"
+      log_and_print "           Resolve sudo warnings above, then re-run 'setup.sh sync'."
     fi
   fi
   # gemini-swarm
@@ -715,20 +933,58 @@ print(f"    [{name}] [OK] migrated local -> user scope")
 PYEOF
     }
 
+    # Register an MCP server with claude. If already registered, also verify
+    # that any baked-in env (currently just PATH, which we inject for codex-mcp
+    # and antigravity-mcp) matches what `cmd` asks for. If it drifted (the
+    # entry was registered by an older setup.sh that didn't inject PATH, or
+    # USER_NPM_PREFIX changed across machines), tear down and re-register so
+    # the new env takes effect. Without this, a once-registered entry stays
+    # frozen forever and `setup.sh sync` cannot heal a broken machine.
     add_mcp() {
       local name="$1" cmd="$2" binary="$3"
       log_and_print "    [$name] checking..."
+
+      local needs_register=0
       if echo "$mcp_list" | grep -q "$name"; then
-        log_and_print "    [$name] OK — already registered"
-        # Detect local-scope shadow and auto-migrate. Earlier setup.sh defaulted
-        # to local scope; this preserves env/headers/args via JSON identity.
-        if maybe_timeout 10 claude mcp get "$name" </dev/null 2>/dev/null \
-             | grep -q 'Scope: Local'; then
-          migrate_mcp_local_to_user "$name"
+        # Already registered. Decide if env is current.
+        local expected_path="" current_env="" current_path=""
+        if [[ "$cmd" == *"-e PATH="* ]]; then
+          # Extract PATH=<value> token from the cmd string (value runs up to
+          # next whitespace; we never quote PATH in our generated cmd lines).
+          expected_path="$(echo "$cmd" | sed -nE 's/.*-e PATH=([^[:space:]]+).*/\1/p')"
         fi
-      elif [ -n "$binary" ] && ! command -v "$binary" &>/dev/null; then
-        log_and_print "    [$name] SKIP — $binary binary not found"
+        if [ -n "$expected_path" ]; then
+          current_env="$(maybe_timeout 10 claude mcp get "$name" </dev/null 2>/dev/null || true)"
+          current_path="$(echo "$current_env" | grep -oE 'PATH=[^[:space:]]+' | head -1 | sed 's/^PATH=//')"
+          if [ "$current_path" != "$expected_path" ]; then
+            log_and_print "    [$name] env PATH out of date — re-registering"
+            log_and_print "             have: ${current_path:-<unset>}"
+            log_and_print "             want: $expected_path"
+            maybe_timeout 10 claude mcp remove "$name" -s user </dev/null 2>&1 | sed 's/^/      /' || true
+            # Also clear any local-scope shadow that would resurface
+            maybe_timeout 10 claude mcp remove "$name" -s local </dev/null 2>&1 | sed 's/^/      /' || true
+            needs_register=1
+          fi
+        fi
+        if [ "$needs_register" = "0" ]; then
+          log_and_print "    [$name] OK — already registered"
+          # Detect local-scope shadow and auto-migrate. Earlier setup.sh
+          # defaulted to local scope; this preserves env/headers/args via
+          # JSON identity.
+          if maybe_timeout 10 claude mcp get "$name" </dev/null 2>/dev/null \
+               | grep -q 'Scope: Local'; then
+            migrate_mcp_local_to_user "$name"
+          fi
+        fi
       else
+        needs_register=1
+      fi
+
+      if [ "$needs_register" = "1" ]; then
+        if [ -n "$binary" ] && ! command -v "$binary" &>/dev/null; then
+          log_and_print "    [$name] SKIP — $binary binary not found"
+          return 0
+        fi
         log_and_print "    [$name] registering..."
         local result
         if result=$(run_with_timeout "$name mcp add" "$cmd < /dev/null" 2>&1); then
@@ -741,8 +997,70 @@ PYEOF
 
     # All MCPs registered at -s user (Claude default is local — was creating
     # cwd-bound entries that silently shadowed any user-level OAuth/auth state).
-    add_mcp "codex-mcp" "claude mcp add -s user codex-mcp -- codex-mcp" "codex-mcp"
-    add_mcp "antigravity-mcp" "claude mcp add -s user antigravity-mcp -- antigravity-mcp" "antigravity-mcp"
+    # Stale gemini-mcp entry cleanup: the Byun-jinyoung fork renamed gemini → antigravity,
+    # so any pre-existing gemini-mcp MCP entry points to a binary that no longer exists.
+    # Remove from both scopes (user + local-at-cwd) before registering the new antigravity-mcp.
+    if echo "$mcp_list" | grep -q '^gemini-mcp\b\|^gemini-mcp\s'; then
+      log_and_print "    [gemini-mcp] removing stale entry (fork dropped gemini-mcp → antigravity-mcp)"
+      maybe_timeout 10 claude mcp remove gemini-mcp -s user </dev/null 2>&1 | sed 's/^/      /' || true
+      maybe_timeout 10 claude mcp remove gemini-mcp -s local </dev/null 2>&1 | sed 's/^/      /' || true
+      # Refresh mcp_list so subsequent add_mcp grep checks see the removal
+      mcp_list=$(maybe_timeout 30 claude mcp list < /dev/null 2>&1) || mcp_list=""
+    fi
+
+    # codex-mcp spawns the `codex` CLI from PATH at request time. Claude Code's
+    # MCP child process inherits a minimal PATH that often lacks npm-global/bin,
+    # so codex-mcp silently fails on machines where `codex` lives there (e.g.
+    # @openai/codex installed via `npm i -g`). Inject a PATH that includes
+    # npm-global/bin + standard system dirs at registration time so the value is
+    # baked into ~/.claude.json and reused on every spawn.
+    local NPM_BIN_DIR CODEX_PATH _codex_resolved _codex_dir
+    NPM_BIN_DIR=""
+    if _npm_prefix_q="$(npm config get prefix 2>/dev/null)" && [ -n "$_npm_prefix_q" ]; then
+      NPM_BIN_DIR="${_npm_prefix_q}/bin"
+    fi
+    # Resolve actual codex location now so it can lead the baked-in PATH —
+    # otherwise we hardcode npm/system order and a user's Volta/asdf/nvm shim
+    # gets missed. USER_NPM_PREFIX/bin is where we install into in this script.
+    _codex_resolved=""
+    _codex_dir=""
+    if command -v codex &>/dev/null; then
+      _codex_resolved="$(command -v codex)"
+      _codex_dir="$(dirname "$_codex_resolved")"
+    fi
+    # Build PATH from non-empty segments only (guard against empty npm prefix
+    # turning into bare ":/usr/local/bin..." which means "current dir first").
+    # Order: actual codex location → USER_NPM_PREFIX/bin → currently-configured
+    # npm prefix bin → ~/.npm-global/bin → standard system dirs.
+    CODEX_PATH=""
+    for _seg in "$_codex_dir" \
+                "$USER_NPM_PREFIX/bin" \
+                "$NPM_BIN_DIR" \
+                "$HOME/.npm-global/bin" \
+                "/usr/local/bin" "/opt/homebrew/bin" "/usr/bin" "/bin"; do
+      [ -n "$_seg" ] || continue
+      # de-dup
+      case ":$CODEX_PATH:" in *":$_seg:"*) continue ;; esac
+      [ -z "$CODEX_PATH" ] && CODEX_PATH="$_seg" || CODEX_PATH="${CODEX_PATH}:${_seg}"
+    done
+    # If live PATH lookup missed it, probe each injected segment.
+    if [ -z "$_codex_resolved" ]; then
+      IFS=':' read -ra _segs <<<"$CODEX_PATH"
+      for _seg in "${_segs[@]}"; do
+        if [ -x "$_seg/codex" ]; then _codex_resolved="$_seg/codex"; break; fi
+      done
+    fi
+    if [ -z "$_codex_resolved" ]; then
+      log_and_print "    [codex-mcp] [WARN] \`codex\` CLI not findable. Install with: npm i -g @openai/codex"
+    else
+      log_and_print "    [codex-mcp] codex CLI resolved: $_codex_resolved"
+    fi
+    add_mcp "codex-mcp" \
+      "claude mcp add -s user codex-mcp -e PATH=${CODEX_PATH} -- codex-mcp" \
+      "codex-mcp"
+    add_mcp "antigravity-mcp" \
+      "claude mcp add -s user antigravity-mcp -e PATH=${CODEX_PATH} -- antigravity-mcp" \
+      "antigravity-mcp"
     add_mcp "serena" "claude mcp add -s user serena -- uvx --from 'git+https://github.com/oraios/serena' serena start-mcp-server" ""
     add_mcp "supermemory" "claude mcp add -s user --transport http supermemory https://mcp.supermemory.ai/mcp" ""
   fi
@@ -1077,6 +1395,72 @@ PYEOF
 cmd_doctor() {
   echo "=== cc-bootstrap doctor ==="
 
+  # Establish the same user-owned prefix the sync uses, so the diagnostics
+  # below speak the same vocabulary as the install path.
+  ensure_user_npm_prefix
+
+  echo "[ npm prefix policy ]  (goal: keep MY tools out of world-readable system paths)"
+  local _cur_prefix _cur_root _mode
+  _cur_prefix="$(npm config get prefix 2>/dev/null)"
+  _cur_root="$(npm root -g 2>/dev/null)"
+  echo "  npm config get prefix: ${_cur_prefix:-<unset>}"
+  echo "  npm root -g:           ${_cur_root:-<unset>}"
+  echo "  USER_NPM_PREFIX:       $USER_NPM_PREFIX (sync writes here)"
+  # Report actual permission on USER_NPM_PREFIX so reader can tell if isolation
+  # is in effect. ensure_user_npm_prefix locks this to 0700; a different mode
+  # means either (a) the dir pre-exists with looser perms, or (b) someone else
+  # owns it (unusual).
+  _mode="$(stat -f '%Lp' "$USER_NPM_PREFIX" 2>/dev/null || stat -c '%a' "$USER_NPM_PREFIX" 2>/dev/null)"
+  echo "  USER_NPM_PREFIX mode:  ${_mode:-?}"
+  if [ -n "$_mode" ] && [ "$_mode" != "700" ]; then
+    echo "  [WARN] $USER_NPM_PREFIX is mode $_mode — other users on this host may be able"
+    echo "         to list/read/exec your installed tools. Lock with: chmod 700 $USER_NPM_PREFIX"
+    WARNINGS=$((WARNINGS+1))
+  fi
+  if [ -n "$_cur_prefix" ] && [[ "$_cur_prefix" != "$HOME"/* ]]; then
+    echo "  [WARN] npm prefix is outside \$HOME ($_cur_prefix) — bare 'npm install -g'"
+    echo "         would write into a shared/system path readable by other users."
+    echo "         setup.sh sync overrides per-invocation, but other tools may not."
+    WARNINGS=$((WARNINGS+1))
+  fi
+  # Check if codex-gemini-mcp / @openai/codex packages landed in a system path
+  for p in /usr/lib/node_modules /usr/local/lib/node_modules /opt/homebrew/lib/node_modules; do
+    [ "$p" = "$USER_NPM_PREFIX/lib/node_modules" ] && continue
+    for pkg in @donghae0414/codex-gemini-mcp @openai/codex; do
+      if [ -d "$p/$pkg" ]; then
+        echo "  [WARN] $pkg installed under system path: $p/$pkg"
+        echo "         Other users on this host can read its contents. Re-run"
+        echo "         'setup.sh sync' to reinstall into $USER_NPM_PREFIX, then remove"
+        echo "         the system copy: npm uninstall -g --prefix ${p%/lib/node_modules} $pkg"
+        WARNINGS=$((WARNINGS+1))
+      fi
+    done
+  done
+  for sym in /usr/bin/codex /usr/bin/codex-mcp /usr/bin/antigravity-mcp \
+             /usr/local/bin/codex /usr/local/bin/codex-mcp /usr/local/bin/antigravity-mcp /usr/local/bin/gemini-mcp; do
+    if [ -e "$sym" ] || [ -L "$sym" ]; then
+      echo "  [WARN] $sym present (system path) — readable/executable by other users."
+      echo "         If owned by this user, remove with: rm $sym  (otherwise: sudo rm $sym)"
+      WARNINGS=$((WARNINGS+1))
+    fi
+  done
+  echo ""
+
+  echo "[ Credential / state dir permissions ]  (goal: only owner can read tokens/sessions)"
+  for d in "$HOME/.codex" "$HOME/.gemini" "$HOME/.claude" "$HOME/.config/codex"; do
+    if [ -d "$d" ]; then
+      _mode="$(stat -f '%Lp' "$d" 2>/dev/null || stat -c '%a' "$d" 2>/dev/null)"
+      if [ -n "$_mode" ] && [ "$_mode" != "700" ]; then
+        echo "  [WARN] $d  mode=$_mode  (other users may read tokens/sessions)"
+        echo "         Lock manually: chmod 700 $d   (setup.sh does NOT auto-chmod user state)"
+        WARNINGS=$((WARNINGS+1))
+      else
+        echo "  [OK]   $d  mode=$_mode"
+      fi
+    fi
+  done
+  echo ""
+
   echo "[ CLI tools ]"
   for cmd in git node npm python3 uv claude codex gemini rtk graphify context-mode playwright; do
     if command -v $cmd &>/dev/null; then echo "  [OK] $cmd"
@@ -1107,18 +1491,37 @@ cmd_doctor() {
       if claude mcp list 2>/dev/null | grep -qE "$m.*(Connected|Needs authentication)"; then echo "  [OK] $m"
       else echo "  [MISS] $m"; WARNINGS=$((WARNINGS+1)); fi
     done
+    # Detect stale gemini-mcp entry (fork no longer provides it)
+    if claude mcp list 2>/dev/null | grep -qE '^gemini-mcp\b|^gemini-mcp\s'; then
+      echo "  [STALE] gemini-mcp registered but fork dropped this bin — run 'setup.sh sync' to clean"
+      WARNINGS=$((WARNINGS+1))
+    fi
   fi
 
   echo ""
-  echo "[ codex-gemini-mcp integrity ]"
+  echo "[ codex-gemini-mcp integrity (Byun-jinyoung fork) ]"
   if verify_codex_gemini_mcp; then
     entry_path="$(readlink -f "$(command -v codex-mcp 2>/dev/null)" 2>/dev/null)"
     echo "  [OK] fork features present (codex session_id, antigravity --conversation)"
     echo "        resolved: ${entry_path:-?}"
   else
-    echo "  [FAIL] codex-gemini-mcp integrity — run 'setup.sh sync' to repair"
+    echo "  [FAIL] fork not installed (or upstream donghae0414 shadowing) — run 'setup.sh sync' to repair"
     WARNINGS=$((WARNINGS+1))
   fi
+  # Detect upstream package layered anywhere (npm prefix or system)
+  for p in "$(npm config get prefix 2>/dev/null)/lib/node_modules" /usr/lib/node_modules /usr/local/lib/node_modules; do
+    if [ -f "$p/@donghae0414/codex-gemini-mcp/dist/providers/gemini.js" ]; then
+      echo "  [WARN] upstream donghae0414 package present at $p/@donghae0414/codex-gemini-mcp"
+      WARNINGS=$((WARNINGS+1))
+    fi
+  done
+  for sym in /usr/bin/codex-mcp /usr/bin/gemini-mcp; do
+    if [ -L "$sym" ]; then
+      echo "  [WARN] legacy system symlink $sym → $(readlink -f "$sym" 2>/dev/null)"
+      echo "         Remove: sudo rm $sym"
+      WARNINGS=$((WARNINGS+1))
+    fi
+  done
   for bin in codex-mcp antigravity-mcp; do
     if mcp_spawn_check "$bin"; then
       echo "  [OK] $bin stdio handshake"
@@ -1127,6 +1530,36 @@ cmd_doctor() {
       WARNINGS=$((WARNINGS+1))
     fi
   done
+  # codex CLI scan — surface ALL installs (deterministic policy: exactly one)
+  _doctor_cands=()
+  for _seg in "$(npm config get prefix 2>/dev/null)/bin" "$HOME/.npm-global/bin" /usr/local/bin /opt/homebrew/bin /usr/bin; do
+    if [ -x "$_seg/codex" ]; then
+      _resolved="$(readlink -f "$_seg/codex" 2>/dev/null || echo "$_seg/codex")"
+      _dup=0
+      for _existing in "${_doctor_cands[@]}"; do
+        [ "$(readlink -f "$_existing" 2>/dev/null || echo "$_existing")" = "$_resolved" ] && _dup=1 && break
+      done
+      [ "$_dup" = "1" ] || _doctor_cands+=("$_seg/codex")
+    fi
+  done
+  if [ "${#_doctor_cands[@]}" -eq 0 ]; then
+    echo "  [FAIL] codex CLI missing — install: npm i -g @openai/codex"
+    WARNINGS=$((WARNINGS+1))
+  elif [ "${#_doctor_cands[@]}" -eq 1 ]; then
+    if command -v codex &>/dev/null; then
+      echo "  [OK] codex CLI on PATH (${_doctor_cands[0]})"
+    else
+      echo "  [OK] codex CLI at ${_doctor_cands[0]} (not on live PATH; codex-mcp PATH env will resolve it)"
+    fi
+  else
+    echo "  [WARN] multiple codex installs (non-deterministic):"
+    for _existing in "${_doctor_cands[@]}"; do
+      echo "          • $_existing → $(readlink -f "$_existing" 2>/dev/null || echo "$_existing")"
+    done
+    command -v codex &>/dev/null && echo "          PATH winner: $(command -v codex)"
+    echo "          Keep one (recommended: \$(npm config get prefix)/bin/codex); remove rest."
+    WARNINGS=$((WARNINGS+1))
+  fi
 
   echo ""
   echo "[ MCP servers (Codex/Gemini for triangle-review) ]"
