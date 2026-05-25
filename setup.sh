@@ -1671,10 +1671,13 @@ PYEOF
   else echo "  [MISS] GSD"; WARNINGS=$((WARNINGS+1)); fi
   if command -v rtk &>/dev/null; then
     echo "  [OK] RTK $(rtk --version 2>/dev/null)"
-    if grep -q 'rtk-rewrite.sh' "$CONFIG_DIR/settings.json" 2>/dev/null; then
+    # Current rtk hook pattern (rtk >= 0.38, also installed by older versions):
+    #   PreToolUse[Bash] -> { "command": "rtk hook claude" }
+    # The pre-0.38 `rtk-rewrite.sh` shell-script form is legacy.
+    if grep -q 'rtk hook claude' "$CONFIG_DIR/settings.json" 2>/dev/null; then
       echo "  [OK] RTK hook active in settings.json"
-      if grep -q 'rtk hook claude' "$CONFIG_DIR/settings.json" 2>/dev/null; then
-        echo "  [WARN] legacy 'rtk hook claude' entry also present — run 'setup.sh sync' to strip"
+      if grep -q 'rtk-rewrite\.sh' "$CONFIG_DIR/settings.json" 2>/dev/null; then
+        echo "  [WARN] legacy 'rtk-rewrite.sh' entry also present — run 'setup.sh sync' to strip"
         WARNINGS=$((WARNINGS+1))
       fi
     else
