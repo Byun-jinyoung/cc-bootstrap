@@ -236,8 +236,16 @@ cleanup_upstream_codex_gemini_mcp() {
         log_and_print "    [cleanup] uninstalling upstream @donghae0414/codex-gemini-mcp from $prefix"
         run_with_timeout "npm uninstall upstream ($prefix)" \
           "npm uninstall -g --prefix '$prefix' @donghae0414/codex-gemini-mcp" \
-          | tail -2 || true
-        removed=1
+          | tail -2
+        local uninstall_rc=${PIPESTATUS[0]}
+        if [ "$uninstall_rc" -eq 0 ] && [ ! -d "$pkg_dir" ]; then
+          removed=1
+        else
+          log_and_print "    [cleanup] [WARN] upstream uninstall failed at $prefix (rc=$uninstall_rc); fork may be shadowed on PATH"
+          if [[ "$prefix" == /usr/* ]] || [[ "$prefix" == /opt/* ]]; then
+            log_and_print "      Try: sudo npm uninstall -g --prefix '$prefix' @donghae0414/codex-gemini-mcp"
+          fi
+        fi
       fi
     fi
   done
