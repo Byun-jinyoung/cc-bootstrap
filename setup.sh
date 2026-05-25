@@ -155,7 +155,7 @@ ensure_user_npm_prefix() {
   # Lock owner-only so other users on a shared server can't `ls`, read, or
   # exec what's inside. Idempotent. Only applied if we own the dir (skip if
   # somehow another uid created it — let user inspect).
-  if [ -w "$USER_NPM_PREFIX" ] && [ "$(stat -f '%u' "$USER_NPM_PREFIX" 2>/dev/null || stat -c '%u' "$USER_NPM_PREFIX" 2>/dev/null)" = "$(id -u)" ]; then
+  if [ -w "$USER_NPM_PREFIX" ] && [ "$(stat -c '%u' "$USER_NPM_PREFIX" 2>/dev/null || stat -f '%u' "$USER_NPM_PREFIX" 2>/dev/null)" = "$(id -u)" ]; then
     chmod 700 "$USER_NPM_PREFIX" "$USER_NPM_PREFIX/bin" "$USER_NPM_PREFIX/lib" 2>/dev/null || true
   fi
   # Env string prepended to npm invocations. npm_config_prefix is the official
@@ -1418,7 +1418,7 @@ cmd_doctor() {
   # is in effect. ensure_user_npm_prefix locks this to 0700; a different mode
   # means either (a) the dir pre-exists with looser perms, or (b) someone else
   # owns it (unusual).
-  _mode="$(stat -f '%Lp' "$USER_NPM_PREFIX" 2>/dev/null || stat -c '%a' "$USER_NPM_PREFIX" 2>/dev/null)"
+  _mode="$(stat -c '%a' "$USER_NPM_PREFIX" 2>/dev/null || stat -f '%Lp' "$USER_NPM_PREFIX" 2>/dev/null)"
   echo "  USER_NPM_PREFIX mode:  ${_mode:-?}"
   if [ -n "$_mode" ] && [ "$_mode" != "700" ]; then
     echo "  [WARN] $USER_NPM_PREFIX is mode $_mode — other users on this host may be able"
@@ -1457,7 +1457,7 @@ cmd_doctor() {
   echo "[ Credential / state dir permissions ]  (goal: only owner can read tokens/sessions)"
   for d in "$HOME/.codex" "$HOME/.gemini" "$HOME/.claude" "$HOME/.config/codex"; do
     if [ -d "$d" ]; then
-      _mode="$(stat -f '%Lp' "$d" 2>/dev/null || stat -c '%a' "$d" 2>/dev/null)"
+      _mode="$(stat -c '%a' "$d" 2>/dev/null || stat -f '%Lp' "$d" 2>/dev/null)"
       if [ -n "$_mode" ] && [ "$_mode" != "700" ]; then
         echo "  [WARN] $d  mode=$_mode  (other users may read tokens/sessions)"
         echo "         Lock manually: chmod 700 $d   (setup.sh does NOT auto-chmod user state)"
