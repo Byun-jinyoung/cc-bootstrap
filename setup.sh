@@ -1516,18 +1516,40 @@ cmd_doctor() {
     echo "  [FAIL] fork not installed (or upstream donghae0414 shadowing) — run 'setup.sh sync' to repair"
     WARNINGS=$((WARNINGS+1))
   fi
-  # Detect upstream package layered anywhere (npm prefix or system)
-  for p in "$(npm config get prefix 2>/dev/null)/lib/node_modules" /usr/lib/node_modules /usr/local/lib/node_modules; do
-    if [ -f "$p/@donghae0414/codex-gemini-mcp/dist/providers/gemini.js" ]; then
-      echo "  [WARN] upstream donghae0414 package present at $p/@donghae0414/codex-gemini-mcp"
+  # Detect upstream package layered anywhere (npm prefix or system).
+  # Cover: user prefix used by this script, npm-configured prefix, both Homebrew
+  # roots (Intel /usr/local + Apple Silicon /opt/homebrew), legacy system path,
+  # and the literal ~/.npm-global fallback. De-dup via realpath.
+  local _doctor_libs=() _root _libdir _libreal _dup _existing _tgt
+  for _root in \
+    "${USER_NPM_PREFIX:-}" \
+    "$(npm config get prefix 2>/dev/null)" \
+    /usr /usr/local /opt/homebrew \
+    "$HOME/.npm-global"; do
+    [ -n "$_root" ] || continue
+    _libdir="$_root/lib/node_modules"
+    [ -d "$_libdir" ] || continue
+    _libreal="$(readlink -f "$_libdir" 2>/dev/null || echo "$_libdir")"
+    _dup=0
+    for _existing in "${_doctor_libs[@]}"; do
+      [ "$_existing" = "$_libreal" ] && _dup=1 && break
+    done
+    [ "$_dup" = "1" ] && continue
+    _doctor_libs+=("$_libreal")
+    if [ -f "$_libreal/@donghae0414/codex-gemini-mcp/dist/providers/gemini.js" ]; then
+      echo "  [WARN] upstream donghae0414 package present at $_libreal/@donghae0414/codex-gemini-mcp"
       WARNINGS=$((WARNINGS+1))
     fi
   done
-  for sym in /usr/bin/codex-mcp /usr/bin/gemini-mcp; do
+  for sym in /usr/bin/codex-mcp /usr/bin/gemini-mcp /usr/local/bin/codex-mcp /usr/local/bin/gemini-mcp /usr/local/bin/antigravity-mcp; do
     if [ -L "$sym" ]; then
-      echo "  [WARN] legacy system symlink $sym → $(readlink -f "$sym" 2>/dev/null)"
-      echo "         Remove: sudo rm $sym"
-      WARNINGS=$((WARNINGS+1))
+      _tgt="$(readlink -f "$sym" 2>/dev/null)"
+      # Only warn if it points outside the user prefix (i.e., a stale legacy install)
+      if [ -z "$_tgt" ] || [[ "$_tgt" != "${USER_NPM_PREFIX:-/__none__}"/* ]]; then
+        echo "  [WARN] legacy system symlink $sym → ${_tgt:-<dangling>}"
+        echo "         Remove: sudo rm $sym"
+        WARNINGS=$((WARNINGS+1))
+      fi
     fi
   done
   for bin in codex-mcp antigravity-mcp; do
