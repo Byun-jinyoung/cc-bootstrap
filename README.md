@@ -16,9 +16,7 @@ bash setup.sh
 |---|---|
 | **codex-gemini-mcp** (fork) | MCP servers `codex-mcp` + `antigravity-mcp` with multi-turn `session_id` resume (Gemini provider removed 2026-06-18) |
 | **my-statusline.mjs** | Custom HUD: model, branch, 5h/7d usage bars, context, agents, todos |
-| **gemini-swarm** | Gemini CLI extension for multi-agent parallel execution |
-| **gemini-swarm.md** | Claude Code skill for invoking gemini-swarm |
-| **GEMINI.md** | Global reliability rules for Gemini CLI |
+| **GEMINI.md** | Global reliability rules for Antigravity (agy reads `~/.gemini/GEMINI.md` via gemini-cli inheritance) |
 | **instructions.md** | Global reliability rules for Codex CLI |
 | **OMC patches** | Model-first display order in OMC HUD |
 | **Graphify** | Knowledge graph CLI (`graphifyy` package, `graphify` command), Claude/Codex skills, and project hooks |
@@ -28,14 +26,20 @@ bash setup.sh
 ```
 cc-bootstrap/
 ├── setup.sh                              # One-command installer
-├── hud/
+├── ui/statusline/
 │   └── my-statusline.mjs                 # Custom statusline (OMC HUD wrapper)
-├── claude/commands/
-│   └── gemini-swarm.md                   # Gemini swarm skill
-├── codex/
-│   └── instructions.md                   # Codex global rules
-├── gemini/
-│   └── GEMINI.md                         # Gemini global rules
+├── runtimes/
+│   ├── claude/commands/                  # Claude Code slash commands
+│   │   ├── analyze-paper.md
+│   │   └── debate-loop.md
+│   ├── codex/
+│   │   ├── instructions.md               # Codex global rules
+│   │   └── tools.md                      # Codex tool guidance
+│   └── antigravity/
+│       ├── tools.md                      # Antigravity (agy) tool guidance
+│       └── skills/
+├── rules/                                # SRP-split global rule modules (Layer A)
+├── skills/                               # Shared cc-bootstrap skills (codebase-scan, triangle-review, ...)
 └── patches/
     └── omc-render-model-first.sh         # OMC HUD model-first patch
 ```
@@ -45,7 +49,7 @@ cc-bootstrap/
 - Node.js >= 20
 - git, npm
 - Claude Code CLI
-- (Optional) Gemini CLI: `npm install -g @google/gemini-cli`
+- (Optional) Antigravity (agy): see https://antigravity.google.com — gemini-cli successor
 - (Optional) Codex CLI: `npm install -g @openai/codex`
 
 ## Project Graphify Setup
@@ -72,5 +76,4 @@ bash patches/omc-render-model-first.sh
 ## Related Repos
 
 - [codex-gemini-mcp (fork)](https://github.com/Byun-jinyoung/codex-gemini-mcp) — `codex-mcp` + `antigravity-mcp` with session resume + multi-turn
-- [gemini-swarm](https://github.com/tmdgusya/gemini-swarm) — multi-agent orchestration
 - [oh-my-claudecode](https://github.com/Yeachan-Heo/oh-my-claudecode) — workflow orchestration plugin

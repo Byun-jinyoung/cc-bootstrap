@@ -9,7 +9,7 @@
 | P1 | Layer A `AGENTS.md` — 13개 섹션 단일 파일 (책임 혼재) | 유지보수·선택적 포함 불가 |
 | P2 | Layer C loader — 텍스트 지시문 (`@import` 아님) | 템플릿·PROJECT.md 자동 로드 안 됨 (soft) |
 | P3 | 최상단 CLAUDE.md — 단순 concat 덤프 | oh-my-setting식 lean 구조 아님 |
-| P4 | MCP — Claude는 plugin, Codex/Gemini는 일부만 등록 | 3-CLI MCP 비대칭 |
+| P4 | MCP — Claude는 plugin, Codex/Antigravity는 일부만 등록 | 3-CLI MCP 비대칭 |
 | P5 | 프로젝트 문서 산재 (if-dfm: CLAUDE.md + policy/ + CONVENTIONS.md + docs/) | 중복·SRP 위반 |
 
 ## 2. 설계 원칙
@@ -17,7 +17,7 @@
 1. **SRP**: 문서 1개 = 책임 1개.
 2. **정적 해소(Static resolution)**: 의존성은 sync/apply 시점에 **병합**으로 해소 — `@import` 런타임 의존 배제 (Codex `@import` 불안정 → 3-CLI 균일성 위해 병합 채택).
 3. **Lean 최상단**: 최상단 CLAUDE.md = oh-my-setting식 compact workflow 헤더 + 병합된 모듈.
-4. **3-CLI 동등**: 규칙·스킬·MCP를 claude/codex/gemini에 동일 적용.
+4. **3-CLI 동등**: 규칙·스킬·MCP를 claude/codex/antigravity에 동일 적용.
 
 ## 3. 문서 분류 (SRP) — 보고
 
@@ -47,11 +47,11 @@
 - **Layer C (핵심 변경)**: `apply-project-template.sh`가 **포인터 대신 템플릿 내용을 managed block에 인라인**. → 프로젝트 CLAUDE.md만 읽어도 ml/slurm 규칙이 그 자리에 존재. Codex/Gemini 포함 균일 자동 로드.
 - **PROJECT.md**: 프로젝트 CLAUDE.md에 `@PROJECT.md` import(Claude/Gemini 자동 펼침) + 텍스트 지시(Codex fallback) 병기.
 
-## 5. 3-CLI 동등성 (codex/gemini)
+## 5. 3-CLI 동등성 (codex/antigravity)
 
 - **규칙**: assembly가 이미 3-CLI 처리 ✓
-- **스킬**: `registry.yaml` → `~/.{claude,codex,gemini,agents}/skills/` symlink ✓ (이미 동작)
-- **MCP (P4 — 미해결)**: Claude=plugin, Codex=`config.toml [mcp_servers]`, Gemini=`settings.json`. setup.sh가 context-mode만 codex에 등록 중. → **통합 MCP 등록 단계** 신설: 스킬이 요구하는 MCP(serena, code-review-graph, context-mode)를 codex+gemini 양쪽 config에 idempotent 등록.
+- **스킬**: `registry.yaml` → `~/.{claude,codex,gemini,agents}/skills/` symlink ✓ (이미 동작; antigravity는 agy의 gemini-cli 상속으로 `~/.gemini/skills`를 그대로 사용)
+- **MCP (P4 — 미해결)**: Claude=plugin, Codex=`config.toml [mcp_servers]`, Antigravity=`~/.gemini/settings.json`. setup.sh가 context-mode만 codex에 등록 중. → **통합 MCP 등록 단계** 신설: 스킬이 요구하는 MCP(serena, code-review-graph, context-mode)를 codex+antigravity 양쪽 config에 idempotent 등록.
 
 ## 6. 실행 단계
 
@@ -60,7 +60,7 @@
 | 1 | `AGENTS.md` → `rules/` 8개 SRP 모듈 분리 | `rules/00~70*.md` | 내용 보존 diff |
 | 2 | `setup.sh assemble_global_rules` — `rules/*.md` 병합으로 변경 | setup.sh | `bash -n` + 조립 출력 |
 | 3 | `apply-project-template.sh` — 포인터→인라인, `@PROJECT.md` 병기 | 스크립트 | dry-run + 실프로젝트 |
-| 4 | MCP 통합 등록 단계 신설 (codex/gemini) | setup.sh `ensure_mcp_parity()` | codex/gemini config 확인 |
+| 4 | MCP 통합 등록 단계 신설 (codex/antigravity) | setup.sh `ensure_mcp_parity()` | codex/antigravity config 확인 |
 | 5 | 프로젝트 문서 통폐합 (if-dfm: 중복 "사용자 작업 스타일"→Layer A 위임) | 프로젝트별 CLAUDE.md | 프로젝트별 커밋 |
 
 각 Phase는 독립 커밋. Phase 1~4는 cc-bootstrap, Phase 5는 각 프로젝트 repo.
@@ -68,5 +68,5 @@
 ## 7. 미결 결정 (사용자 확인 필요)
 
 - D1: `rules/` 8모듈 분리 입도 — 8개가 과한가? (6개로 통합 대안: core/context/workflow/editing/verification+review/documentation)
-- D2: Layer C 인라인 시 프로젝트 CLAUDE.md 비대해짐 (ml 템플릿 ~100줄 인라인). 허용 가능한가? 아니면 Claude만 `@import`, Codex/Gemini는 인라인 하이브리드?
+- D2: Layer C 인라인 시 프로젝트 CLAUDE.md 비대해짐 (ml 템플릿 ~100줄 인라인). 허용 가능한가? 아니면 Claude만 `@import`, Codex/Antigravity는 인라인 하이브리드?
 - D3: if-dfm 기존 "사용자 작업 스타일" 섹션 — Layer A와 중복. 삭제하고 Layer A 위임 vs 프로젝트 고유분만 남기기.
