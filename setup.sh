@@ -270,7 +270,7 @@ cleanup_upstream_codex_gemini_mcp() {
 mcp_spawn_check() {
   local bin="$1"
   command -v "$bin" &>/dev/null || return 1
-  timeout 3 "$bin" </dev/null 2>&1 | head -1 | grep -q 'started on stdio'
+  maybe_timeout 3 "$bin" </dev/null 2>&1 | head -1 | grep -q 'started on stdio'
 }
 
 append_section_if_missing() {
