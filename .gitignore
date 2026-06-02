@@ -7,6 +7,14 @@ node_modules/
 graphify-out/
 .claude/settings.local.json
 
+# Python bytecode (generated when skills' scripts run)
+__pycache__/
+*.pyc
+*.pyo
+
+# codex-mcp / gemini-mcp runtime logs (per-machine, never synced)
+.codex-gemini-mcp/
+
 # Machine-specific local snapshots — generated per machine, never synced
 local/
 skills/slurm-hpc/references/cluster.generated.md
