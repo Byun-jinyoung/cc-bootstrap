@@ -955,6 +955,23 @@ PYEOF
             log_and_print "    [$name] env PATH out of date — re-registering"
             log_and_print "             have: ${current_path:-<unset>}"
             log_and_print "             want: $expected_path"
+            # Preserve any user-added env vars (anything except PATH, which we
+            # re-inject below). Without this, ad-hoc keys in ~/.claude.json
+            # (e.g. MCP_CODEX_DEFAULT_MODEL) get silently dropped whenever a
+            # PATH drift triggers re-register.
+            local _preserve_args="" _eline _ek _ev
+            while IFS= read -r _eline; do
+              [ -z "$_eline" ] && continue
+              _ek="${_eline%%=*}"
+              _ev="${_eline#*=}"
+              case "$_ek" in PATH|"") continue ;; esac
+              _preserve_args+=" -e ${_ek}=${_ev}"
+              log_and_print "    [$name] preserving env: ${_ek}"
+            done < <(echo "$current_env" | sed -nE 's/^[[:space:]]+([A-Z_][A-Z0-9_]*=.*)$/\1/p' | grep -v '^PATH=')
+            if [ -n "$_preserve_args" ]; then
+              # Inject preserved -e flags just before `-- <binary>` in cmd
+              cmd="${cmd/ -- /${_preserve_args} -- }"
+            fi
             maybe_timeout 10 claude mcp remove "$name" -s user </dev/null 2>&1 | sed 's/^/      /' || true
             # Also clear any local-scope shadow that would resurface
             maybe_timeout 10 claude mcp remove "$name" -s local </dev/null 2>&1 | sed 's/^/      /' || true
