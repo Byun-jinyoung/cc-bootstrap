@@ -1438,6 +1438,24 @@ PYEOF
     log_and_print "    [WARN] CRG missing. Install uv first, or pip3 install --user code-review-graph (Python>=3.10)"
   fi
 
+  # codegraph — used by codebase-scan skill for symbol-level queries via MCP.
+  # Node-based; install through npm into the user-owned prefix that
+  # ensure_user_npm_prefix established at the top of doctor/sync.
+  if command -v codegraph &>/dev/null; then
+    log_and_print "    [OK] codegraph $(codegraph --version 2>&1 | head -1)"
+  elif command -v npm &>/dev/null; then
+    log_and_print "    Installing codegraph (npm -g)..."
+    run_with_timeout "codegraph install (npm)" "npm i -g @colbymchenry/codegraph < /dev/null" \
+      | tail -2 || true
+    if command -v codegraph &>/dev/null; then
+      log_and_print "    [OK] codegraph installed: $(codegraph --version 2>&1 | head -1)"
+    else
+      log_and_print "    [WARN] codegraph install via npm failed — see $LOG_FILE"
+    fi
+  else
+    log_and_print "    [WARN] codegraph missing. Install Node.js + npm, then: npm i -g @colbymchenry/codegraph"
+  fi
+
   log "=== sync complete ==="
   echo ""
   echo "=== sync complete. Restart Claude Code to apply. ==="
