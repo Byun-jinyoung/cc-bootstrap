@@ -847,15 +847,43 @@ PYEOF
     }
   fi
   # RTK (cross-platform: macOS + Linux)
+  # rtk >= 0.38 is REQUIRED: that's when `rtk hook claude` (the hook command the
+  # init + doctor logic below expect) was introduced. An older binary already on
+  # PATH (e.g. 0.31, which writes a different hook form) must be UPGRADED, not
+  # just skipped — otherwise `rtk init -g` keeps installing the old hook form and
+  # the doctor RTK-hook check WARNs forever. rtk has no self-update subcommand,
+  # so re-running the upstream install.sh is the upgrade path.
   RTK_BIN="$HOME/.local/bin/rtk"
-  if [ -x "$RTK_BIN" ]; then
-    log_and_print "    [OK] RTK $($RTK_BIN --version 2>/dev/null)"
-  else
-    log_and_print "    Installing RTK..."
+  RTK_MIN_VERSION="0.38.0"
+  # Returns 0 if "$1" >= RTK_MIN_VERSION (sort -V: lowest of {min,ver} == min ⇒ ver>=min).
+  rtk_version_ok() {
+    local ver="$1"
+    [ -n "$ver" ] || return 1
+    [ "$(printf '%s\n%s\n' "$RTK_MIN_VERSION" "$ver" | sort -V | head -1)" = "$RTK_MIN_VERSION" ]
+  }
+  rtk_install_upstream() {
     run_with_timeout "RTK install" \
       "curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/master/install.sh | sh" \
       | tail -3 || true
     export PATH="$HOME/.local/bin:$PATH"
+  }
+  if [ -x "$RTK_BIN" ]; then
+    _rtk_cur="$("$RTK_BIN" --version 2>/dev/null | awk '{print $2}')"
+    if rtk_version_ok "$_rtk_cur"; then
+      log_and_print "    [OK] RTK $_rtk_cur (>= $RTK_MIN_VERSION)"
+    else
+      log_and_print "    RTK ${_rtk_cur:-unknown} < $RTK_MIN_VERSION — upgrading (need 'rtk hook claude' form)..."
+      rtk_install_upstream
+      _rtk_new="$(rtk --version 2>/dev/null | awk '{print $2}')"
+      if rtk_version_ok "$_rtk_new"; then
+        log_and_print "    [OK] RTK upgraded: $_rtk_new"
+      else
+        log_and_print "    [WARN] RTK still ${_rtk_new:-unknown} after upgrade (need >= $RTK_MIN_VERSION). See https://github.com/rtk-ai/rtk"
+      fi
+    fi
+  else
+    log_and_print "    Installing RTK..."
+    rtk_install_upstream
     if command -v rtk &>/dev/null; then
       log_and_print "    [OK] RTK installed: $(rtk --version 2>/dev/null)"
     else
