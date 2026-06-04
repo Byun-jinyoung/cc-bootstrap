@@ -308,7 +308,10 @@ def main() -> int:
     p.add_argument("repo", type=Path)
     p.add_argument("--evidence", type=Path, default=None,
                    help="L1.json path (defaults to <repo>/.codemap/evidence/L1.json)")
-    p.add_argument("--top", type=int, default=15)
+    p.add_argument("--top", type=int, default=30,
+                   help="how many BLAST-radius files to analyze (default 30). "
+                        "Raised from 15 after Boltz-FF pilot showed orchestrator/glue "
+                        "files (e.g. BoltzInferenceDataModule, rank 29) being clipped.")
     p.add_argument("--out", type=Path, default=None,
                    help="output dir (defaults to <repo>/.codemap/dataflow)")
     args = p.parse_args()

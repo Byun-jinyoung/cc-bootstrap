@@ -55,7 +55,7 @@ def extract(repo_root: Path) -> dict:
 
     blast = [dict(r) for r in con.execute(
         "SELECT file_path, COUNT(DISTINCT target_qualified) AS touched "
-        "FROM edges GROUP BY file_path ORDER BY touched DESC LIMIT 15"
+        "FROM edges GROUP BY file_path ORDER BY touched DESC LIMIT 30"
     )]
     for b in blast:
         b["file_path"] = normalize(b["file_path"], repo_root)

@@ -65,7 +65,7 @@ def gather(repo_root: Path):
 
     blast = [(normalize(r["file_path"], repo_root), r["touched"]) for r in con.execute(
         "SELECT file_path, COUNT(DISTINCT target_qualified) AS touched "
-        "FROM edges GROUP BY file_path ORDER BY touched DESC LIMIT 10")]
+        "FROM edges GROUP BY file_path ORDER BY touched DESC LIMIT 20")]
 
     hubs = [(r["target_qualified"], r["c"]) for r in con.execute(
         "SELECT target_qualified, COUNT(*) AS c FROM edges "
