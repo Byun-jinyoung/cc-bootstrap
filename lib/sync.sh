@@ -1,50 +1,14 @@
 # oh-my-agent-env: cmd_sync (sourced by setup.sh)
 # Not standalone — relies on globals defined in setup.sh and helpers from
 # lib/common.sh (must be sourced first).
+#
+# cmd_sync is decomposed into ordered phase functions (sync_*) below; the
+# orchestrator at the bottom calls them in the original execution order.
+# Behavior is unchanged — sections were extracted verbatim. Phase functions
+# rely on bash dynamic scope + globals, so they take no arguments.
 
-cmd_sync() {
-  log "=== oh-my-agent-env sync started ==="
-  log "  Platform: $(uname -s) $(uname -m)"
-  log "  Shell: $SHELL"
-  log "  PATH: $PATH"
-  echo "=== oh-my-agent-env sync ==="
-  echo "  Log: $LOG_FILE"
-  echo ""
-  # Dependencies
-  for cmd in git node npm python3; do
-    command -v $cmd &>/dev/null || { log_and_print "[FAIL] $cmd not found"; ERRORS=$((ERRORS+1)); }
-  done
-  [ $ERRORS -gt 0 ] && echo "FATAL: missing deps" && exit 1
-
-  # Force every npm global install in this sync into a $HOME-rooted prefix
-  # locked to mode 0700, so on a shared/multi-user server MY tools (codex-mcp,
-  # @openai/codex, antigravity-mcp, etc.) are not readable or executable by
-  # other users on the box. Anything under /usr/local|/opt|/usr would be 0755
-  # by default (world-readable+exec). Sets USER_NPM_PREFIX + NPM_USER_ENV.
-  ensure_user_npm_prefix
-
-  # Ensure the user prefix bin is on PATH for this sync run, so later checks
-  # like `command -v context-mode` succeed even on shells that haven't added
-  # it themselves. Users still need to add it to their shell rc — see
-  # post-sync instructions.
-  if [ -d "$USER_NPM_PREFIX/bin" ] && [[ ":$PATH:" != *":$USER_NPM_PREFIX/bin:"* ]]; then
-    export PATH="$USER_NPM_PREFIX/bin:$PATH"
-    log "  Added user npm prefix bin to PATH: $USER_NPM_PREFIX/bin"
-  fi
-  # Also keep the currently-configured npm prefix bin reachable (only matters
-  # if it differs from USER_NPM_PREFIX, e.g. user has a system prefix but we're
-  # redirecting writes to ~/.npm-global). Reading old installs is harmless;
-  # we never WRITE to it.
-  if command -v npm &>/dev/null; then
-    local _cur_npm_bin
-    _cur_npm_bin="$(npm config get prefix 2>/dev/null)/bin"
-    if [ -n "$_cur_npm_bin" ] && [ "$_cur_npm_bin" != "$USER_NPM_PREFIX/bin" ] \
-       && [ -d "$_cur_npm_bin" ] && [[ ":$PATH:" != *":$_cur_npm_bin:"* ]]; then
-      export PATH="$PATH:$_cur_npm_bin"
-      log "  Appended legacy npm prefix bin to PATH (read-only): $_cur_npm_bin"
-    fi
-  fi
-
+# [1][2][2b] Claude commands, hooks, rules-enforcement
+sync_claude() {
   # Claude commands
   echo "[1] Claude commands"
   mkdir -p "$CONFIG_DIR/commands"
@@ -68,7 +32,10 @@ cmd_sync() {
   fi
   echo "[2b] Rules-enforcement hooks (settings.json)"
   ensure_rules_enforcement_hooks
+}
 
+# [3][3b][4][4b] Codex instructions, Gemini dir, global rule assembly
+sync_agent_rules() {
   # Codex
   echo "[3] Codex"
   mkdir -p "$CODEX_DIR"
@@ -84,7 +51,10 @@ cmd_sync() {
   # Global rule files (Layer A + Layer B) — Claude, Codex, Gemini
   echo "[4b] Global rule assembly"
   assemble_global_rules
+}
 
+# [5][6] Shared skills (registry.yaml) + statusline
+sync_skills_statusline() {
   # Shared skills (from registry.yaml)
   echo "[5] Shared skills"
   if [ -f "$SCRIPT_DIR/skills/registry.yaml" ] && command -v python3 &>/dev/null; then
@@ -153,17 +123,10 @@ PYEOF
     mkdir -p "$CONFIG_DIR/hud"
     make_link "$SCRIPT_DIR/ui/statusline/my-statusline.mjs" "$CONFIG_DIR/hud/my-statusline.mjs"
   fi
+}
 
-  # Network-dependent steps (skip with --skip-network)
-  if $SKIP_NETWORK; then
-    log_and_print "[7-10] Skipped (--skip-network)"
-    log "=== sync complete (network steps skipped) ==="
-    echo ""
-    echo "=== sync complete (network steps skipped). Restart Claude Code to apply. ==="
-    echo "  Full log: $LOG_FILE"
-    return
-  fi
-
+# [7] External tools (context-mode, codex CLI, codex-gemini-mcp fork, OMC patches)
+sync_external_tools() {
   # External tools
   log_and_print "[7] External tools"
   # context-mode (Codex MCP + hooks)
@@ -323,7 +286,10 @@ PYEOF
         | sed 's/^/    /' || true
     fi
   fi
+}
 
+# [8][9] Claude Code plugins + MCP servers (incl. local helpers install_plugin/add_mcp/migrate)
+sync_plugins_mcp() {
   # [8] Claude Code plugins
   log_and_print "[8] Plugins"
   if command -v claude &>/dev/null; then
@@ -621,7 +587,10 @@ PYEOF
     add_mcp "serena" "claude mcp add -s user serena -- uvx --from 'git+https://github.com/oraios/serena' serena start-mcp-server" ""
     add_mcp "supermemory" "claude mcp add -s user --transport http supermemory https://mcp.supermemory.ai/mcp" ""
   fi
+}
 
+# [9b][9c][10] Codex/Antigravity MCP entries, Serena hardening, frameworks (GSD/RTK/Graphify/CRG/codegraph)
+sync_agent_mcp_frameworks() {
   # [9b] Codex / Antigravity MCP registration (for triangle-review + codebase-scan)
   # serena와 code-review-graph는 ~/.codex/config.toml과
   # ~/.gemini/config/mcp_config.json에 별도 등록되어야 함
@@ -1045,6 +1014,68 @@ PYEOF
   else
     log_and_print "    [WARN] codegraph missing. Install Node.js + npm, then: npm i -g @colbymchenry/codegraph"
   fi
+}
+
+cmd_sync() {
+  log "=== oh-my-agent-env sync started ==="
+  log "  Platform: $(uname -s) $(uname -m)"
+  log "  Shell: $SHELL"
+  log "  PATH: $PATH"
+  echo "=== oh-my-agent-env sync ==="
+  echo "  Log: $LOG_FILE"
+  echo ""
+  # Dependencies
+  for cmd in git node npm python3; do
+    command -v $cmd &>/dev/null || { log_and_print "[FAIL] $cmd not found"; ERRORS=$((ERRORS+1)); }
+  done
+  [ $ERRORS -gt 0 ] && echo "FATAL: missing deps" && exit 1
+
+  # Force every npm global install in this sync into a $HOME-rooted prefix
+  # locked to mode 0700, so on a shared/multi-user server MY tools (codex-mcp,
+  # @openai/codex, antigravity-mcp, etc.) are not readable or executable by
+  # other users on the box. Anything under /usr/local|/opt|/usr would be 0755
+  # by default (world-readable+exec). Sets USER_NPM_PREFIX + NPM_USER_ENV.
+  ensure_user_npm_prefix
+
+  # Ensure the user prefix bin is on PATH for this sync run, so later checks
+  # like `command -v context-mode` succeed even on shells that haven't added
+  # it themselves. Users still need to add it to their shell rc — see
+  # post-sync instructions.
+  if [ -d "$USER_NPM_PREFIX/bin" ] && [[ ":$PATH:" != *":$USER_NPM_PREFIX/bin:"* ]]; then
+    export PATH="$USER_NPM_PREFIX/bin:$PATH"
+    log "  Added user npm prefix bin to PATH: $USER_NPM_PREFIX/bin"
+  fi
+  # Also keep the currently-configured npm prefix bin reachable (only matters
+  # if it differs from USER_NPM_PREFIX, e.g. user has a system prefix but we're
+  # redirecting writes to ~/.npm-global). Reading old installs is harmless;
+  # we never WRITE to it.
+  if command -v npm &>/dev/null; then
+    local _cur_npm_bin
+    _cur_npm_bin="$(npm config get prefix 2>/dev/null)/bin"
+    if [ -n "$_cur_npm_bin" ] && [ "$_cur_npm_bin" != "$USER_NPM_PREFIX/bin" ] \
+       && [ -d "$_cur_npm_bin" ] && [[ ":$PATH:" != *":$_cur_npm_bin:"* ]]; then
+      export PATH="$PATH:$_cur_npm_bin"
+      log "  Appended legacy npm prefix bin to PATH (read-only): $_cur_npm_bin"
+    fi
+  fi
+
+  sync_claude
+  sync_agent_rules
+  sync_skills_statusline
+
+  # Network-dependent steps (skip with --skip-network)
+  if $SKIP_NETWORK; then
+    log_and_print "[7-10] Skipped (--skip-network)"
+    log "=== sync complete (network steps skipped) ==="
+    echo ""
+    echo "=== sync complete (network steps skipped). Restart Claude Code to apply. ==="
+    echo "  Full log: $LOG_FILE"
+    return
+  fi
+
+  sync_external_tools
+  sync_plugins_mcp
+  sync_agent_mcp_frameworks
 
   log "=== sync complete ==="
   echo ""

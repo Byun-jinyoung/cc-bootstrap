@@ -7,7 +7,7 @@
 #   cleanup_upstream_codex_gemini_mcp, mcp_spawn_check,
 #   append_section_if_missing, ensure_line_in_file,
 #   ensure_codex_multi_agent, ensure_codex_context_mode,
-#   ensure_codex_rtk_inline, write_graphify_project_config,
+#   write_graphify_project_config,
 #   assemble_global_rules.
 
 log() {
@@ -368,33 +368,6 @@ console.log("[OK] Codex: context-mode hooks installed in hooks.json");
 // ~/.codex/AGENTS.md is assembled by assemble_global_rules (Layer A + Layer B);
 // context-mode routing lives in runtimes/codex/tools.md.
 JSEOF
-}
-
-ensure_codex_rtk_inline() {
-  local agents_file="$CODEX_DIR/AGENTS.md"
-  local marker="## RTK - Rust Token Killer (Codex enforced)"
-  mkdir -p "$CODEX_DIR"
-  if [ -f "$agents_file" ] && grep -qF "$marker" "$agents_file"; then
-    log_and_print "    [OK] Codex: inline RTK instructions already present"
-    return
-  fi
-  cat >> "$agents_file" << 'MDEOF'
-
-## RTK - Rust Token Killer (Codex enforced)
-
-When running shell commands, prefix token-heavy or inspect-style commands with `rtk`.
-This applies even if `@RTK.md` include expansion is unavailable.
-
-Examples:
-- `ls -la path` -> `rtk ls -la path`
-- `git status` -> `rtk git status`
-- `grep pattern file` -> `rtk grep pattern file`
-- `npm run build` -> `rtk npm run build`
-
-Use raw shell only when the command must not be filtered, when debugging RTK itself,
-or when the command is a shell-only control operation such as `cd`.
-MDEOF
-  log_and_print "    [OK] Codex: added inline RTK instructions to AGENTS.md"
 }
 
 write_graphify_project_config() {
