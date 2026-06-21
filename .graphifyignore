@@ -6,6 +6,8 @@
 .code-review-graph/
 graphify-out/
 node_modules/
+skills/**/vendor/
+*.min.js
 .DS_Store
 *.tmp
 *.log

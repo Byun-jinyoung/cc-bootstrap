@@ -1,0 +1,1 @@
+~/.oh-my-agent-env는 사용자가 다른 머신에서도 같은 설정으로 작업을 할 수 있도록 설정을 진행하는 custom package이다. 이전에 논의된 방향으로 ~/.oh-my-agent-env의 구성을 조사하고 setup/sync/doctor 구조를 재현성, idempotency, runtime parity 기준으로 정리하는 작업을 수행하라. 혹시 실수를 할 수 도 있으니 복구 가능성을 위해 먼저 현재 상태 git commit 후 작업을 진행.

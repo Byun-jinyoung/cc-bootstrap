@@ -1,0 +1,36 @@
+# C001 structure and load evidence
+## git diff stat
+ .graphifyignore |    2 +
+ README.md       |   26 +-
+ lib/doctor.sh   |  403 +--------------------
+ lib/sync.sh     | 1067 +------------------------------------------------------
+ 4 files changed, 61 insertions(+), 1437 deletions(-)
+
+## lib file tree
+lib/common.sh
+lib/doctor.sh
+lib/doctor/agent-mcp.sh
+lib/doctor/claude.sh
+lib/doctor/codex-integrity.sh
+lib/doctor/frameworks.sh
+lib/doctor/lazycodex.sh
+lib/doctor/local-prereqs.sh
+lib/doctor/main.sh
+lib/sync.sh
+lib/sync/core.sh
+lib/sync/external-tools.sh
+lib/sync/frameworks.sh
+lib/sync/plugins-mcp.sh
+lib/sync/rules.sh
+lib/sync/skills.sh
+
+## shell syntax
+bash -n: OK
+
+## smoke test
+[1] shell syntax
+[2] required sync domains
+[3] required doctor domains
+[4] public command functions
+[5] isolated HOME validate
+smoke-refactor OK

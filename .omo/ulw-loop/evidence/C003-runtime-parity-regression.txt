@@ -1,0 +1,50 @@
+# C003 runtime parity regression evidence
+## setup.sh validate
+=== oh-my-agent-env validate ===
+  [OK] codebase-scan
+  [OK] git-cli-workflow
+  [OK] multi-agent-review
+  [OK] paper-analyzer
+  [OK] slurm-hpc
+  [OK] spec-interview
+  [OK] triangle-review
+  [OK] analyze-paper.md
+  [OK] debate-loop.md
+  [OK] update-feeds.md
+  [OK] update-refs.md
+## setup.sh doctor summary
+  [OK] omo (/Users/byunjin-young/.local/bin/omo)
+  [OK] antigravity-mcp
+  [OK] fork features present (codex session_id, antigravity --conversation)
+  [OK] antigravity-mcp stdio handshake
+[ LazyCodex (Codex plugin) ]
+  [OK] omo@sisyphuslabs installed, enabled (4.12.1)
+  [OK] codex multi_agent
+  [OK] codex context-mode
+  [OK] antigravity serena
+  [OK] antigravity code-review-graph
+  [OK] codex context-mode hooks
+  [OK] codex context-mode routing instructions
+  [OK] codex context-mode: 'context-mode' resolves under baked PATH
+  [OK] codex antigravity-mcp: 'antigravity-mcp' resolves under baked PATH
+  [OK] codex antigravity-mcp: 'agy' resolves under baked PATH
+  3 item(s) missing.
+doctor rc: 0
+## graphify update
+[graphify] WARNING: new graph has 140 nodes but existing graph.json has 3758. Refusing to overwrite — you may be missing chunk files from a previous session. Pass force=True to override.
+Nothing to update or rebuild failed — check output above.
+Re-extracting code files in . (no LLM needed)...
+graphify update: BLOCKED by graphify safety refusal after vendor ignore reduced node count; requires explicit force to overwrite graphify-out baseline.
+## git status short
+ M .graphifyignore
+ M README.md
+ M lib/doctor.sh
+ M lib/sync.sh
+?? .omo/ulw-loop/
+?? lib/doctor/
+?? lib/sync/
+?? tests/
+
+## graphify force syntax probe
+Command: graphify update . force=True
+Result: same safety refusal; graphify --help does not document force syntax in this installed version.

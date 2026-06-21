@@ -1,0 +1,103 @@
+# C002 idempotency and reproducibility evidence
+## first shell syntax run
+first bash -n: OK
+## second shell syntax run
+second bash -n: OK
+## isolated HOME sync --skip-network
+=== oh-my-agent-env sync ===
+  Log: /var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.oh-my-agent-env/logs/setup_20260621_151511.log
+
+[1] Claude commands
+    [LINK] analyze-paper.md → /Users/byunjin-young/.oh-my-agent-env/runtimes/claude/commands/analyze-paper.md
+    [LINK] debate-loop.md → /Users/byunjin-young/.oh-my-agent-env/runtimes/claude/commands/debate-loop.md
+    [LINK] update-feeds.md → /Users/byunjin-young/.oh-my-agent-env/runtimes/claude/commands/update-feeds.md
+    [LINK] update-refs.md → /Users/byunjin-young/.oh-my-agent-env/runtimes/claude/commands/update-refs.md
+[2] Claude hooks
+    [LINK] inject-core-rules.js → /Users/byunjin-young/.oh-my-agent-env/runtimes/claude/hooks/inject-core-rules.js
+    [LINK] pre-edit-gate.js → /Users/byunjin-young/.oh-my-agent-env/runtimes/claude/hooks/pre-edit-gate.js
+    [LINK] stop-verify-gate.js → /Users/byunjin-young/.oh-my-agent-env/runtimes/claude/hooks/stop-verify-gate.js
+    [LINK] rules-core.md → /Users/byunjin-young/.oh-my-agent-env/runtimes/claude/rules-core.md
+[2b] Rules-enforcement hooks (settings.json)
+    [OK] rules-enforcement hooks registered: UserPromptSubmit:inject-core-rules.js, Stop:stop-verify-gate.js, PreToolUse:pre-edit-gate.js
+[3] Codex
+    [LINK] instructions.md → /Users/byunjin-young/.oh-my-agent-env/runtimes/codex/instructions.md
+[3b] Codex feature flags
+    [OK] Codex: created [features] multi_agent in config.toml
+[4] Gemini
+[4b] Global rule assembly
+    [OK] /var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.claude/CLAUDE.md (Layer A rules/ + claude tools)
+    [OK] /var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.codex/AGENTS.md (Layer A rules/ + codex tools)
+    [OK] /var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.gemini/GEMINI.md (Layer A rules/ + antigravity tools)
+[5] Shared skills
+    [WARN] PyYAML missing. Using minimal registry parser.
+    [LINK] codex/paper-analyzer → /Users/byunjin-young/.oh-my-agent-env/skills/paper-analyzer/codex
+    [LINK] antigravity/paper-analyzer → /Users/byunjin-young/.oh-my-agent-env/skills/paper-analyzer
+    [LINK] claude/triangle-review → /Users/byunjin-young/.oh-my-agent-env/skills/triangle-review
+    [LINK] claude/codebase-scan → /Users/byunjin-young/.oh-my-agent-env/skills/codebase-scan
+    [LINK] codex/codebase-scan → /Users/byunjin-young/.oh-my-agent-env/skills/codebase-scan
+    [LINK] antigravity/codebase-scan → /Users/byunjin-young/.oh-my-agent-env/skills/codebase-scan
+    [LINK] claude/slurm-hpc → /Users/byunjin-young/.oh-my-agent-env/skills/slurm-hpc
+    [LINK] agents/slurm-hpc → /Users/byunjin-young/.oh-my-agent-env/skills/slurm-hpc
+    [LINK] claude/spec-interview → /Users/byunjin-young/.oh-my-agent-env/skills/spec-interview
+    [LINK] agents/spec-interview → /Users/byunjin-young/.oh-my-agent-env/skills/spec-interview
+    [LINK] claude/git-cli-workflow → /Users/byunjin-young/.oh-my-agent-env/skills/git-cli-workflow
+    [LINK] agents/git-cli-workflow → /Users/byunjin-young/.oh-my-agent-env/skills/git-cli-workflow
+    [LINK] claude/multi-agent-review → /Users/byunjin-young/.oh-my-agent-env/skills/multi-agent-review
+    [LINK] agents/multi-agent-review → /Users/byunjin-young/.oh-my-agent-env/skills/multi-agent-review
+[6] Statusline
+    [LINK] my-statusline.mjs → /Users/byunjin-young/.oh-my-agent-env/ui/statusline/my-statusline.mjs
+[7-10] Skipped (--skip-network)
+
+=== sync complete (network steps skipped). Restart Claude Code to apply. ===
+  Full log: /var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.oh-my-agent-env/logs/setup_20260621_151511.log
+isolated sync --skip-network: OK
+## isolated HOME validate
+=== oh-my-agent-env validate ===
+  [OK] codebase-scan
+  [OK] git-cli-workflow
+  [OK] multi-agent-review
+  [OK] paper-analyzer
+  [OK] slurm-hpc
+  [OK] spec-interview
+  [OK] triangle-review
+  [OK] analyze-paper.md
+  [OK] debate-loop.md
+  [OK] update-feeds.md
+  [OK] update-refs.md
+isolated validate: OK
+## isolated HOME generated paths sample
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.agents/skills/git-cli-workflow
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.agents/skills/multi-agent-review
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.agents/skills/slurm-hpc
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.agents/skills/spec-interview
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.claude/CLAUDE.md
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.claude/commands/analyze-paper.md
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.claude/commands/debate-loop.md
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.claude/commands/update-feeds.md
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.claude/commands/update-refs.md
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.claude/hooks/inject-core-rules.js
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.claude/hooks/pre-edit-gate.js
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.claude/hooks/stop-verify-gate.js
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.claude/hud/my-statusline.mjs
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.claude/rules-core.md
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.claude/settings.json
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.claude/skills/codebase-scan
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.claude/skills/git-cli-workflow
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.claude/skills/multi-agent-review
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.claude/skills/slurm-hpc
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.claude/skills/spec-interview
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.claude/skills/triangle-review
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.codex/AGENTS.md
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.codex/config.toml
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.codex/instructions.md
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.codex/skills/codebase-scan
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.codex/skills/paper-analyzer
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.gemini/GEMINI.md
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.gemini/skills/codebase-scan
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.gemini/skills/paper-analyzer
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.npm/_logs/2026-06-21T06_15_11_742Z-debug-0.log
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.npm/_logs/2026-06-21T06_15_11_964Z-debug-0.log
+/var/folders/qy/3dp2b7ks2_jcsq5_z_pq7__m0000gn/T/tmp.Vc4YJSPrtW/.oh-my-agent-env/logs/setup_20260621_151511.log
+cleanup: removed isolated HOME temp dir
+## skipped checks
+Full network sync intentionally skipped for C002 because reproducibility/idempotency proof must avoid package install/global mutation.

@@ -29,8 +29,23 @@ oh-my-agent-env/
 ├── setup.sh                              # Entry: globals, .env source, dispatcher, small cmd_*
 ├── lib/                                  # setup.sh helpers (sourced after globals)
 │   ├── common.sh                         #   shared helpers (log, link, MCP verify/cleanup, codex hooks, ...)
-│   ├── sync.sh                           #   cmd_sync body (plugins, MCP, frameworks)
-│   └── doctor.sh                         #   cmd_doctor body (diagnostics)
+│   ├── sync.sh                           #   cmd_sync orchestrator, stable phase order
+│   ├── sync/
+│   │   ├── core.sh                       #   Claude commands/hooks
+│   │   ├── rules.sh                      #   Codex/Gemini dirs + global rules
+│   │   ├── skills.sh                     #   registry.yaml skill links + statusline
+│   │   ├── external-tools.sh             #   context-mode, Codex CLI, LazyCodex, fork install
+│   │   ├── plugins-mcp.sh                #   Claude plugins + Claude MCP registration
+│   │   └── frameworks.sh                 #   Codex/Antigravity MCPs, Serena, GSD/RTK/Graphify/CRG/codegraph
+│   ├── doctor.sh                         #   cmd_doctor loader
+│   └── doctor/
+│       ├── local-prereqs.sh              #   npm prefix, state dirs, CLI tools, symlinks
+│       ├── claude.sh                     #   Claude plugins + Claude MCP surfaces
+│       ├── codex-integrity.sh            #   codex-gemini-mcp fork and codex CLI integrity
+│       ├── lazycodex.sh                  #   LazyCodex / omo@sisyphuslabs plugin check
+│       ├── agent-mcp.sh                  #   Codex/Antigravity MCP and context-mode checks
+│       ├── frameworks.sh                 #   managed skills, GSD, RTK, Graphify, CRG
+│       └── main.sh                       #   cmd_doctor orchestration
 ├── ui/statusline/
 │   └── my-statusline.mjs                 # Custom statusline (OMC HUD wrapper)
 ├── runtimes/
@@ -46,9 +61,16 @@ oh-my-agent-env/
 ├── rules/                                # SRP-split global rule modules (Layer A)
 ├── skills/                               # Shared oh-my-agent-env skills (codebase-scan, triangle-review, ...)
 ├── scripts/                              # Helper shell scripts (apply-project-template, snapshot, ...)
+├── tests/
+│   └── smoke-refactor.sh                 # Source graph + isolated HOME validate smoke test
 └── patches/
     └── omc-render-model-first.sh         # OMC HUD model-first patch
 ```
+
+`setup.sh` is intentionally kept as the stable user-facing entrypoint. The
+`sync` and `doctor` loaders preserve command names while domain files make
+runtime parity easier to review: setup mutating domains and diagnostic domains
+are now visible in the file tree instead of being hidden in monolithic scripts.
 
 ## Prerequisites
 
