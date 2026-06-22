@@ -15,11 +15,11 @@ bash setup.sh
 | Component | Description |
 |---|---|
 | **codex-gemini-mcp** (fork) | MCP servers `codex-mcp` + `antigravity-mcp` with multi-turn `session_id` resume (Gemini provider removed 2026-06-18) |
-| **my-statusline.mjs** | Custom HUD: model, branch, 5h/7d usage bars, context, agents, todos |
+| **my-statusline.mjs** | Custom statusline (omc-free, OMC-style bars): `Model: \| branch: \| 5h/wk usage bars \| session \| ctx` — renders from the cc-alchemy usage cache + transcript |
 | **GEMINI.md** | Global reliability rules for Antigravity (agy reads `~/.gemini/GEMINI.md` via gemini-cli inheritance) |
 | **instructions.md** | Global reliability rules for Codex CLI |
 | **LazyCodex** | Codex plugin `omo@sisyphuslabs` installed via `npx lazycodex-ai@latest install --no-tui` |
-| **OMC patches** | Model-first display order in OMC HUD |
+| **oh-my-agent (oma)** | Per-project multi-agent harness (first-fluke/oh-my-agent), installed via `setup.sh oma <path>` |
 | **Graphify** | Knowledge graph CLI (`graphifyy` package, `graphify` command), Claude/Codex skills, and project hooks |
 
 ## Directory Structure
@@ -47,7 +47,7 @@ oh-my-agent-env/
 │       ├── frameworks.sh                 #   managed skills, GSD, RTK, Graphify, CRG
 │       └── main.sh                       #   cmd_doctor orchestration
 ├── ui/statusline/
-│   └── my-statusline.mjs                 # Custom statusline (OMC HUD wrapper)
+│   └── my-statusline.mjs                 # Custom statusline (omc-free; reuses cc-alchemy-statusline)
 ├── runtimes/
 │   ├── claude/commands/                  # Claude Code slash commands
 │   │   ├── analyze-paper.md
@@ -61,10 +61,8 @@ oh-my-agent-env/
 ├── rules/                                # SRP-split global rule modules (Layer A)
 ├── skills/                               # Shared oh-my-agent-env skills (codebase-scan, triangle-review, ...)
 ├── scripts/                              # Helper shell scripts (apply-project-template, snapshot, ...)
-├── tests/
-│   └── smoke-refactor.sh                 # Source graph + isolated HOME validate smoke test
-└── patches/
-    └── omc-render-model-first.sh         # OMC HUD model-first patch
+└── tests/
+    └── smoke-refactor.sh                 # Source graph + isolated HOME validate smoke test
 ```
 
 `setup.sh` is intentionally kept as the stable user-facing entrypoint. The
@@ -112,16 +110,7 @@ bash setup.sh init-project /path/to/project
 
 This appends the Graphify guidance section to `AGENTS.md` and `CLAUDE.md`, installs `.codex/hooks.json` and `.claude/settings.json` hooks, and creates `.graphifyignore` defaults.
 
-## After OMC Updates
-
-Re-apply patches:
-
-```bash
-cd oh-my-agent-env
-bash patches/omc-render-model-first.sh
-```
-
 ## Related Repos
 
 - [codex-gemini-mcp (fork)](https://github.com/Byun-jinyoung/codex-gemini-mcp) — `codex-mcp` + `antigravity-mcp` with session resume + multi-turn
-- [oh-my-claudecode](https://github.com/Yeachan-Heo/oh-my-claudecode) — workflow orchestration plugin
+- [oh-my-agent](https://github.com/first-fluke/oh-my-agent) — per-project multi-agent harness (installed via `setup.sh oma <path>`)

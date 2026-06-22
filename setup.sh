@@ -11,6 +11,7 @@
 #   update    — git pull → validate → sync → doctor
 #   install   — Legacy copy-based install (environments where symlinks don't work)
 #   init-project <path> — Initialize per-project settings (Serena registration, .claude/settings.local.json)
+#   oma [path] — Install/refresh oh-my-agent (oma) in a project (default: cwd); generate-from-source, idempotent
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -234,9 +235,52 @@ MDEOF
   echo "  Next: cd $project_path && claude"
 }
 
+# oma — install/refresh oh-my-agent (first-fluke/oh-my-agent) in a project,
+# generate-from-source style: oma's generated tree (.agents/, vendor .claude
+# subdirs, .mcp.json) is gitignored and regenerated here on each machine; only
+# templates/oma/oma-config.yaml is tracked and overlaid so customizations
+# survive regeneration. oma install is idempotent, so re-running converges
+# settings.json / CLAUDE.md without churn. Coexists with omc-free runtimes.
+cmd_oma() {
+  local project_path="${1:-$PWD}"
+  project_path="$(cd "$project_path" 2>/dev/null && pwd)" || {
+    echo "[FAIL] Directory not found: ${1:-$PWD}"
+    exit 1
+  }
+  local oma_version="${OMA_VERSION:-latest}"
+  echo "=== oh-my-agent-env oma: $(basename "$project_path") ==="
+  echo "  Path: $project_path  (oma@$oma_version)"
+
+  if ! command -v bunx &>/dev/null; then
+    echo "  [SKIP] bunx not found — install bun first: https://bun.sh"
+    return 0
+  fi
+
+  echo "[1] oma install (idempotent)"
+  if ( cd "$project_path" && OMA_YES=1 CI=true bunx "oh-my-agent@${oma_version}" install < /dev/null ) \
+       2>&1 | grep -v -E 'Resolving|Resolved|warn:|Saved lockfile|→ \.' | sed 's/^/    /'; then
+    :
+  else
+    echo "  [WARN] oma install reported a failure — review output above"
+  fi
+
+  echo "[2] Overlay canonical oma-config.yaml"
+  local tmpl="$SCRIPT_DIR/templates/oma/oma-config.yaml"
+  if [ -f "$tmpl" ] && [ -d "$project_path/.agents" ]; then
+    cp "$tmpl" "$project_path/.agents/oma-config.yaml"
+    echo "    [OK] applied templates/oma/oma-config.yaml"
+  else
+    echo "    [SKIP] template or $project_path/.agents missing"
+  fi
+
+  echo "=== oma complete: $(basename "$project_path") ==="
+  echo "  Next: cd $project_path && claude   (then name a workflow, e.g. orchestrate)"
+}
+
 case "$SUBCMD" in
   sync) cmd_sync ;; doctor) cmd_doctor ;; validate) cmd_validate ;;
   update) cmd_update ;; install) cmd_install ;;
   init-project) cmd_init_project "$SUBCMD_ARG" ;;
-  *) echo "Usage: ./setup.sh {sync|doctor|validate|update|install|init-project <path>}"; exit 1 ;;
+  oma) cmd_oma "$SUBCMD_ARG" ;;
+  *) echo "Usage: ./setup.sh {sync|doctor|validate|update|install|init-project <path>|oma [path]}"; exit 1 ;;
 esac

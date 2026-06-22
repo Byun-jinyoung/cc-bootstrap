@@ -1,7 +1,7 @@
 # oh-my-agent-env: sync domain - external-tools.sh
 # Sourced by lib/sync.sh; not standalone.
 
-# [7] External tools (context-mode, codex CLI, LazyCodex, codex-gemini-mcp fork, OMC patches)
+# [7] External tools (context-mode, codex CLI, LazyCodex, codex-gemini-mcp fork)
 sync_external_tools() {
   # External tools
   log_and_print "[7] External tools"
@@ -173,17 +173,4 @@ sync_external_tools() {
   # gemini-swarm install logic removed 2026-05-25: Gemini CLI is fully deprecated
   # in favor of Antigravity (agy). runtimes/claude/commands/gemini-swarm.md
   # already carries a DEPRECATED notice for the orchestration command.
-  # OMC patches — only run if (a) OMC's render.js is present and (b) we're
-  # on Linux. The patch script uses GNU `sed -i '...'` syntax which is not
-  # compatible with BSD sed on macOS (BSD sed requires `sed -i '' '...'`).
-  if [ -f "$SCRIPT_DIR/patches/omc/omc-render-model-first.sh" ]; then
-    if ! find "$CONFIG_DIR/plugins/cache/omc/oh-my-claudecode" -name render.js -path '*/hud/*' 2>/dev/null | grep -q .; then
-      log_and_print "    [SKIP] OMC patches — oh-my-claudecode plugin not installed (or cache not yet materialized)"
-    elif [ "$(uname -s)" = "Darwin" ]; then
-      log_and_print "    [SKIP] OMC patches — patch script is GNU-sed only (not macOS-compatible)"
-    else
-      run_with_timeout "OMC patches" "bash '$SCRIPT_DIR/patches/omc/omc-render-model-first.sh'" \
-        | sed 's/^/    /' || true
-    fi
-  fi
 }

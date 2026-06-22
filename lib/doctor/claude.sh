@@ -4,7 +4,7 @@
 doctor_claude_surfaces() {
   echo "[ Plugins ]"
   if command -v claude &>/dev/null; then
-    for p in "octo@nyldn" "claude-mem@thedotmack" "ouroboros@ouroboros" "document-skills@anthropic" "oh-my-claudecode" "context-mode@context-mode" "codex@openai-codex"; do
+    for p in "octo@nyldn" "claude-mem@thedotmack" "ouroboros@ouroboros" "document-skills@anthropic" "context-mode@context-mode" "codex@openai-codex"; do
       if claude plugin list 2>/dev/null | grep -q "$p"; then echo "  [OK] $p"
       else echo "  [MISS] $p"; WARNINGS=$((WARNINGS+1)); fi
     done

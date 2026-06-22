@@ -35,7 +35,6 @@ sync_plugins_mcp() {
     install_plugin "claude-mem" "claude-mem@thedotmack" "thedotmack/claude-mem" "claude-mem@thedotmack"
     install_plugin "ouroboros" "ouroboros@ouroboros" "Q00/ouroboros" "ouroboros@ouroboros"
     install_plugin "document-skills" "document-skills@anthropic" "anthropics/skills" "document-skills@anthropic-agent-skills"
-    install_plugin "oh-my-claudecode" "oh-my-claudecode" "https://github.com/Yeachan-Heo/oh-my-claudecode" "oh-my-claudecode"
     install_plugin "context-mode" "context-mode@context-mode" "mksglu/context-mode" "context-mode@context-mode"
     # OpenAI official: /codex:review, /codex:adversarial-review, /codex:rescue, etc.
     # Uses the global `codex` CLI + ~/.codex/config.toml. Coexists with codex-mcp.
