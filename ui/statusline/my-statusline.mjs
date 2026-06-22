@@ -1,17 +1,23 @@
 #!/usr/bin/env node
 /**
- * Byun's Custom Statusline (omc-free, OMC-style layout)
+ * Byun's Custom Statusline (omc-free) — merged OMA + cc-alchemy view.
  *
- * Reproduces the OMC HUD look — Model | branch | 5h/wk usage bars | session |
- * ctx bar — WITHOUT oh-my-claudecode. Data sources:
- *   - stdin JSON (Claude Code statusline payload): model, context_window, cwd,
- *     transcript_path (session start = first transcript timestamp)
- *   - ~/.claude/statusline_cache.json: 5h / 7d usage windows, populated by
- *     cc-alchemy-statusline's OAuth fetch (reused here purely as the fetcher).
- * A background `cc-alchemy-statusline --fetch-only` keeps that cache fresh.
+ * One line, OMC-style bars, combining:
+ *   - cc-alchemy/our side: Model, git branch, 5h/wk usage BARS, session timer, ctx bar
+ *   - oma side (read straight from the statusline payload): $cost, token io
  *
- * Omitted vs the original OMC HUD (engine-internal, no source without omc):
- *   [OMC#version] label, the "sn" window, agents/todos/ralph operational state.
+ * Data sources:
+ *   - stdin JSON (Claude Code / agy statusline payload): model, context_window
+ *     (used_percentage, total_input/output_tokens), cost.total_cost_usd,
+ *     rate_limits.{five_hour,seven_day} (used_percentage, resets_at),
+ *     transcript_path. Rate limits are taken from the payload when present.
+ *   - ~/.claude/statusline_cache.json: 5h/7d windows from cc-alchemy's OAuth
+ *     fetch — used as a FALLBACK when the payload omits rate_limits (e.g. older
+ *     Claude Code). A background `cc-alchemy-statusline --fetch-only` keeps it warm.
+ *   - transcript first timestamp → session duration.
+ *
+ * No oh-my-claudecode (omc) dependency. Omitted vs oma's HUD: [OMA] label,
+ * subagents/bg/workflow operational state (oma-engine-internal).
  *
  * Install: statusLine in ~/.claude/settings.json:
  *   { "type": "command", "command": "node $HOME/.claude/hud/my-statusline.mjs" }
@@ -66,7 +72,8 @@ function readCache() {
 }
 
 // Refresh the usage cache in the background (cc-alchemy rate-limits its own
-// fetches, so calling this every render is cheap and usually a no-op).
+// fetches, so calling this every render is cheap and usually a no-op). Only
+// matters when the payload itself doesn't carry rate_limits.
 function refreshCache() {
   try {
     const child = spawn("cc-alchemy-statusline", ["--fetch-only"], {
@@ -75,20 +82,19 @@ function refreshCache() {
     });
     child.unref();
   } catch {
-    // cc-alchemy not installed — render with whatever cache exists.
+    // cc-alchemy not installed — render with whatever cache/payload exists.
   }
 }
 
 // Session duration = now - first transcript entry timestamp. Reads only the
 // first chunk of the (append-only) transcript, so cost is O(1) regardless of
-// transcript size.
+// transcript size. The first few entries are meta (no timestamp); take the
+// first one that has one.
 function sessionMins(transcriptPath) {
   if (!transcriptPath) return null;
   let fd;
   try {
     fd = openSync(transcriptPath, "r");
-    // Read a bounded chunk (the first few lines are meta entries without a
-    // timestamp; the first real entry that has one is the session start).
     const buf = Buffer.alloc(16384);
     const n = readSync(fd, buf, 0, buf.length, 0);
     for (const line of buf.toString("utf-8", 0, n).split("\n")) {
@@ -112,6 +118,12 @@ function fmtDuration(mins) {
   return m ? `${h}h${m}m` : `${h}h`;
 }
 
+function fmtTokens(n) {
+  if (n < 1000) return `${n}`;
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
 function bar(pct, n) {
   const filled = Math.max(0, Math.min(n, Math.round((pct / 100) * n)));
   return "[" + "█".repeat(filled) + "░".repeat(n - filled) + "]";
@@ -127,11 +139,12 @@ function resetTxt(resetsAt) {
   return `(${m}m)`;
 }
 
+// A usage window may come from the payload ({used_percentage, resets_at}) or
+// the cc-alchemy cache ({utilization, resets_at}). Normalize both.
 function usageSeg(label, period) {
-  if (!period || period.utilization == null) {
-    return `${DIM}${label}:${bar(0, 8)}${RST} ${DIM}--${RST}`;
-  }
-  const u = Math.round(period.utilization);
+  const pct = period?.used_percentage ?? period?.utilization;
+  if (pct == null) return `${DIM}${label}:${bar(0, 8)}${RST} ${DIM}--${RST}`;
+  const u = Math.round(pct);
   return `${DIM}${label}:${pcolor(u)}${bar(u, 8)}${u}%${DIM}${resetTxt(period.resets_at)}${RST}`;
 }
 
@@ -150,17 +163,32 @@ function main() {
   const branch = gitBranch(cwd);
   const ctxPct = Math.round(data.context_window?.used_percentage || 0);
 
+  // Rate limits: prefer the payload, fall back to the cc-alchemy cache.
   const cache = readCache();
+  const five = data.rate_limits?.five_hour ?? cache.five_hour;
+  const week = data.rate_limits?.seven_day ?? cache.seven_day;
+
   const mins = sessionMins(data.transcript_path);
+  const cost = data.cost?.total_cost_usd;
+  const inTok = data.context_window?.total_input_tokens || 0;
+  const outTok = data.context_window?.total_output_tokens || 0;
 
   const SEP = ` ${DIM}|${RST} `;
-  const parts = [`${DIM}Model: ${MODEL}${name}${RST}`];
-  if (branch) parts.push(`${DIM}branch:${BRANCH}${branch}${RST}`);
-  parts.push(`${usageSeg("5h", cache.five_hour)} ${usageSeg("wk", cache.seven_day)}`);
-  if (mins != null) parts.push(`${DIM}session:${TEXT}${fmtDuration(mins)}${RST}`);
-  parts.push(`${DIM}ctx:${pcolor(ctxPct)}${bar(ctxPct, 10)}${ctxPct}%${RST}`);
 
-  console.log(parts.join(SEP));
+  // Line 1: identity (model + branch)
+  const line1 = [`${DIM}Model: ${MODEL}${name}${RST}`];
+  if (branch) line1.push(`${DIM}branch:${BRANCH}${branch}${RST}`);
+
+  // Line 2: usage / cost metrics
+  const line2 = [`${usageSeg("5h", five)} ${usageSeg("wk", week)}`];
+  if (mins != null) line2.push(`${DIM}session:${TEXT}${fmtDuration(mins)}${RST}`);
+  line2.push(`${DIM}ctx:${pcolor(ctxPct)}${bar(ctxPct, 10)}${ctxPct}%${RST}`);
+  if (cost != null && cost > 0) line2.push(`${DIM}$${TEXT}${cost.toFixed(2)}${RST}`);
+  if (inTok > 0 || outTok > 0) {
+    line2.push(`${DIM}tok:${TEXT}${fmtTokens(inTok)}↑${fmtTokens(outTok)}↓${RST}`);
+  }
+
+  console.log(line1.join(SEP) + "\n" + line2.join(SEP));
   refreshCache();
 }
 

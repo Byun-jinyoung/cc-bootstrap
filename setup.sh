@@ -273,6 +273,31 @@ cmd_oma() {
     echo "    [SKIP] template or $project_path/.agents missing"
   fi
 
+  # oma's installer points the project statusLine at its own bun hud.ts. We
+  # keep a single unified statusline (the omc-free my-statusline.mjs, which
+  # already merges oma's $cost/token/rate-limit fields with our branch/bars/
+  # session) so every project shows the same bar. Re-point it here; idempotent.
+  echo "[3] Unify project statusLine -> my-statusline.mjs (override oma hud.ts)"
+  python3 - "$project_path/.claude/settings.json" << 'PYEOF'
+import json, os, sys, tempfile
+p = sys.argv[1]
+if not os.path.exists(p):
+    print("    [SKIP] no project .claude/settings.json"); sys.exit(0)
+try:
+    d = json.load(open(p))
+except Exception as e:
+    print(f"    [WARN] settings.json unreadable ({e}); left as-is"); sys.exit(0)
+want = {"type": "command", "command": "node $HOME/.claude/hud/my-statusline.mjs"}
+if d.get("statusLine") == want:
+    print("    [OK] statusLine already unified"); sys.exit(0)
+d["statusLine"] = want
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(p), suffix=".tmp")
+with os.fdopen(fd, "w") as f:
+    json.dump(d, f, indent=2, ensure_ascii=False); f.write("\n")
+os.replace(tmp, p)
+print("    [OK] statusLine -> $HOME/.claude/hud/my-statusline.mjs")
+PYEOF
+
   echo "=== oma complete: $(basename "$project_path") ==="
   echo "  Next: cd $project_path && claude   (then name a workflow, e.g. orchestrate)"
 }
