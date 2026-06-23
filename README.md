@@ -110,6 +110,21 @@ bash setup.sh init-project /path/to/project
 
 This appends the Graphify guidance section to `AGENTS.md` and `CLAUDE.md`, installs `.codex/hooks.json` and `.claude/settings.json` hooks, and creates `.graphifyignore` defaults.
 
+## oma (oh-my-agent) Setup
+
+Install/refresh the per-project multi-agent harness:
+
+```bash
+bash setup.sh oma /path/to/project   # default: current dir; idempotent
+```
+
+This runs `bunx oh-my-agent@latest install`, then:
+
+- **`.agents/oma-config.yaml` is a managed file** — `setup.sh oma` overwrites it from `templates/oma/oma-config.yaml` on every run. This is the single source of truth (cross-machine reproducibility, no drift). **To change config, edit `templates/oma/oma-config.yaml`** (tracked) and re-run — do not hand-edit the generated copy, it is overwritten.
+- **statusline** — oma points the project statusLine at its own `hud.ts`. `setup.sh oma` re-pins our unified statusline in `.claude/settings.local.json` (gitignored, outranks project `settings.json`), so it wins and survives every oma re-link. Always install oma via `setup.sh oma` (not `bunx` directly) to keep this pin.
+
+oma's generated tree (`.agents/`, vendor `.claude/*`, `.mcp.json`) is gitignored; only `templates/oma/oma-config.yaml` is tracked.
+
 ## Related Repos
 
 - [codex-gemini-mcp (fork)](https://github.com/Byun-jinyoung/codex-gemini-mcp) — `codex-mcp` + `antigravity-mcp` with session resume + multi-turn

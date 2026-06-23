@@ -44,4 +44,28 @@ trap 'rm -rf "$tmp_home"' EXIT
 HOME="$tmp_home" bash "$ROOT/setup.sh" validate >/tmp/oh-my-agent-env-validate.out
 grep -q '=== oh-my-agent-env validate ===' /tmp/oh-my-agent-env-validate.out
 
+echo "[6] oma subcommand isolated smoke (stubbed bunx, no network)"
+oma_tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp_home" "$oma_tmp"' EXIT
+stub_bin="$oma_tmp/bin"; mkdir -p "$stub_bin" "$oma_tmp/home"
+# offline stub: oma install just materializes .agents/ in the project cwd
+cat > "$stub_bin/bunx" <<'STUB'
+#!/usr/bin/env bash
+mkdir -p "$PWD/.agents"
+echo "stub: oma installed"
+STUB
+chmod +x "$stub_bin/bunx"
+oma_proj="$oma_tmp/proj"; mkdir -p "$oma_proj"
+run_oma() { PATH="$stub_bin:$PATH" HOME="$oma_tmp/home" bash "$ROOT/setup.sh" oma "$oma_proj" >/dev/null 2>&1; }
+run_oma
+# a) oma-config.yaml overlaid byte-identical to the tracked template (managed)
+cmp -s "$oma_proj/.agents/oma-config.yaml" "$ROOT/templates/oma/oma-config.yaml"
+# b) statusLine pinned in settings.local.json -> our unified script
+python3 -c "import json,sys; d=json.load(open('$oma_proj/.claude/settings.local.json')); sys.exit(0 if d.get('statusLine',{}).get('command','').endswith('my-statusline.mjs') else 1)"
+# c) idempotent: a second run leaves both outputs byte-stable
+cp "$oma_proj/.claude/settings.local.json" "$oma_tmp/sl1"
+run_oma
+cmp -s "$oma_proj/.claude/settings.local.json" "$oma_tmp/sl1"
+cmp -s "$oma_proj/.agents/oma-config.yaml" "$ROOT/templates/oma/oma-config.yaml"
+
 echo "smoke-refactor OK"

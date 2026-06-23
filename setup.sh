@@ -264,11 +264,15 @@ cmd_oma() {
     echo "  [WARN] oma install reported a failure — review output above"
   fi
 
-  echo "[2] Overlay canonical oma-config.yaml"
+  # POLICY: .agents/oma-config.yaml is a MANAGED file — overwritten from the
+  # repo template on every run. Single source of truth = cross-machine
+  # reproducibility + no drift. To change config, edit templates/oma/oma-config.yaml
+  # (tracked), NOT the generated copy (local edits there are intentionally lost).
+  echo "[2] Overlay canonical oma-config.yaml (managed — edit templates/oma/ to change)"
   local tmpl="$SCRIPT_DIR/templates/oma/oma-config.yaml"
   if [ -f "$tmpl" ] && [ -d "$project_path/.agents" ]; then
     cp "$tmpl" "$project_path/.agents/oma-config.yaml"
-    echo "    [OK] applied templates/oma/oma-config.yaml"
+    echo "    [OK] applied templates/oma/oma-config.yaml (managed; local edits overwritten)"
   else
     echo "    [SKIP] template or $project_path/.agents missing"
   fi
