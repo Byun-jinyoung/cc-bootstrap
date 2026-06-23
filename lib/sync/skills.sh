@@ -70,5 +70,33 @@ PYEOF
   if [ -f "$SCRIPT_DIR/ui/statusline/my-statusline.mjs" ]; then
     mkdir -p "$CONFIG_DIR/hud"
     make_link "$SCRIPT_DIR/ui/statusline/my-statusline.mjs" "$CONFIG_DIR/hud/my-statusline.mjs"
+    # Register the global statusLine in settings.json. Previously sync only
+    # created the symlink and the statusLine key was a manual step — so on a
+    # fresh `clone → sync` machine the statusline never applied. Always point
+    # it at our script (policy: ours wins) so it's reproducible everywhere.
+    local _sl_cmd
+    if [ "$CONFIG_DIR" = "$HOME/.claude" ]; then
+      _sl_cmd='node $HOME/.claude/hud/my-statusline.mjs'
+    else
+      _sl_cmd="node $CONFIG_DIR/hud/my-statusline.mjs"
+    fi
+    python3 - "$CONFIG_DIR/settings.json" "$_sl_cmd" << 'PYEOF'
+import json, os, sys, tempfile
+p, cmd = sys.argv[1], sys.argv[2]
+try:
+    d = json.load(open(p)) if os.path.exists(p) else {}
+except Exception as e:
+    print(f"    [WARN] settings.json unreadable ({e}); statusLine not set"); sys.exit(0)
+want = {"type": "command", "command": cmd}
+if d.get("statusLine") == want:
+    print("    [OK] statusLine already registered"); sys.exit(0)
+d["statusLine"] = want
+os.makedirs(os.path.dirname(p), exist_ok=True)
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(p), suffix=".tmp")
+with os.fdopen(fd, "w") as f:
+    json.dump(d, f, indent=2, ensure_ascii=False); f.write("\n")
+os.replace(tmp, p)
+print(f"    [OK] statusLine registered -> {cmd}")
+PYEOF
   fi
 }
