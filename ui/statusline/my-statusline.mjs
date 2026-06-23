@@ -80,6 +80,11 @@ function refreshCache() {
       detached: true,
       stdio: "ignore",
     });
+    // spawn() reports a missing binary via an async 'error' event, NOT the
+    // synchronous try/catch. Without this listener the unhandled error crashes
+    // the process (exit 1) on machines where cc-alchemy isn't installed, so the
+    // statusline silently breaks even though both lines were already printed.
+    child.on("error", () => {});
     child.unref();
   } catch {
     // cc-alchemy not installed — render with whatever cache/payload exists.

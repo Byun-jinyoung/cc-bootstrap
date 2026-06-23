@@ -273,29 +273,32 @@ cmd_oma() {
     echo "    [SKIP] template or $project_path/.agents missing"
   fi
 
-  # oma's installer points the project statusLine at its own bun hud.ts. We
-  # keep a single unified statusline (the omc-free my-statusline.mjs, which
-  # already merges oma's $cost/token/rate-limit fields with our branch/bars/
-  # session) so every project shows the same bar. Re-point it here; idempotent.
-  echo "[3] Unify project statusLine -> my-statusline.mjs (override oma hud.ts)"
-  python3 - "$project_path/.claude/settings.json" << 'PYEOF'
+  # oma re-injects statusLine -> its bun hud.ts into the PROJECT
+  # .claude/settings.json on every install/link. settings.local.json is
+  # gitignored AND outranks settings.json in Claude Code's settings precedence
+  # (local > project > user), so we pin our unified statusline there: it beats
+  # oma's hud.ts and survives every oma re-link without touching a tracked file.
+  # Merge (preserve permissions/env that init-project writes) + idempotent.
+  echo "[3] Pin statusLine in .claude/settings.local.json (beats oma hud.ts)"
+  python3 - "$project_path/.claude" << 'PYEOF'
 import json, os, sys, tempfile
-p = sys.argv[1]
-if not os.path.exists(p):
-    print("    [SKIP] no project .claude/settings.json"); sys.exit(0)
+claude_dir = sys.argv[1]
+p = os.path.join(claude_dir, "settings.local.json")
 try:
-    d = json.load(open(p))
+    d = json.load(open(p)) if os.path.exists(p) else {}
+    if not isinstance(d, dict): d = {}
 except Exception as e:
-    print(f"    [WARN] settings.json unreadable ({e}); left as-is"); sys.exit(0)
+    print(f"    [WARN] settings.local.json unreadable ({e}); not pinned"); sys.exit(0)
 want = {"type": "command", "command": "node $HOME/.claude/hud/my-statusline.mjs"}
 if d.get("statusLine") == want:
-    print("    [OK] statusLine already unified"); sys.exit(0)
+    print("    [OK] statusLine already pinned (settings.local.json)"); sys.exit(0)
 d["statusLine"] = want
-fd, tmp = tempfile.mkstemp(dir=os.path.dirname(p), suffix=".tmp")
+os.makedirs(claude_dir, exist_ok=True)
+fd, tmp = tempfile.mkstemp(dir=claude_dir, suffix=".tmp")
 with os.fdopen(fd, "w") as f:
     json.dump(d, f, indent=2, ensure_ascii=False); f.write("\n")
 os.replace(tmp, p)
-print("    [OK] statusLine -> $HOME/.claude/hud/my-statusline.mjs")
+print("    [OK] statusLine pinned -> settings.local.json")
 PYEOF
 
   echo "=== oma complete: $(basename "$project_path") ==="
